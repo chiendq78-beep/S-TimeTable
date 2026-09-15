@@ -1,0 +1,6 @@
+{
+  "name": "Student Timetable & Academics",
+  "description": "Quản lý thời gian biểu học sinh, lịch học thêm, lịch thi, bài tập và bảng điểm báo cáo học tập.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
