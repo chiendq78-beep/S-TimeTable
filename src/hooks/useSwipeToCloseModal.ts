@@ -1,15 +1,80 @@
 import React, { useEffect, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
 
 interface UseSwipeToCloseModalOptions {
   isOpen: boolean;
   onClose: () => void;
 }
 
+// Active modal stack to guarantee predictable LIFO modal closing across the app
+const activeModals: Array<() => void> = [];
+let isClosingModalHistoryCleanup = false;
+
+export function getActiveModalCount(): number {
+  return activeModals.length;
+}
+
+export function isModalHistoryCleaning(): boolean {
+  return isClosingModalHistoryCleanup;
+}
+
+export function hasOpenModal(): boolean {
+  if (activeModals.length > 0) return true;
+  // Fallback to DOM detection
+  if (typeof document === 'undefined') return false;
+  const modalEl = document.querySelector(
+    '.fixed.inset-0.z-50, [data-app-modal="true"], [role="dialog"]'
+  );
+  if (!modalEl) return false;
+  if (
+    modalEl.id === 'mobile-nav-drawer' ||
+    modalEl.closest('#mobile-nav-drawer') ||
+    modalEl.getAttribute('data-mobile-drawer') === 'true'
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function closeTopModal(): boolean {
+  if (activeModals.length > 0) {
+    const topClose = activeModals[activeModals.length - 1];
+    topClose();
+    return true;
+  }
+
+  // Fallback: Dispatch custom event for custom-handled modals
+  if (typeof window !== 'undefined') {
+    const closeEvt = new CustomEvent('app-modal-close', {
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(closeEvt);
+    if (closeEvt.defaultPrevented) return true;
+  }
+
+  // Fallback: Click modal close button
+  if (typeof document !== 'undefined') {
+    const modalEl = document.querySelector('.fixed.inset-0.z-50, [data-app-modal="true"], [role="dialog"]');
+    if (modalEl) {
+      const btn = modalEl.querySelector<HTMLButtonElement>(
+        'button[title*="Đóng"], button[title*="Hủy"], button[title*="Close"], button[title*="Cancel"], button[aria-label*="close" i], button[aria-label*="đóng" i], button.shrink-0'
+      );
+      if (btn) {
+        btn.click();
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 export function useSwipeToCloseModal({ isOpen, onClose }: UseSwipeToCloseModalOptions) {
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  const isHistoryPushedRef = useRef(false);
+  const pushedHistoryRef = useRef(false);
   const touchStartRef = useRef<{
     x: number;
     y: number;
@@ -17,68 +82,99 @@ export function useSwipeToCloseModal({ isOpen, onClose }: UseSwipeToCloseModalOp
     isInput: boolean;
   } | null>(null);
 
-  // 1. Manage browser history state:
-  // Intercepts phone's native edge-swipe back gesture & Android hardware back button
-  // so that swiping back closes the modal instead of exiting/closing the app!
+  // 1. REGISTER IN ACTIVE MODAL STACK & LISTEN TO CUSTOM EVENT
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const closeHandler = () => {
+      onCloseRef.current();
+    };
+
+    activeModals.push(closeHandler);
+
+    const handleAppModalClose = (e: Event) => {
+      e.preventDefault();
+      closeHandler();
+    };
+    window.addEventListener('app-modal-close', handleAppModalClose);
+
+    return () => {
+      const idx = activeModals.indexOf(closeHandler);
+      if (idx !== -1) {
+        activeModals.splice(idx, 1);
+      }
+      window.removeEventListener('app-modal-close', handleAppModalClose);
+    };
+  }, [isOpen]);
+
+  // 2. BROWSER & WEBVIEW HISTORY INTERCEPTION (POPSTATE):
+  // When modal opens, pushes history entry. When popped via Back gesture, safely closes
+  // the modal without leaving the current tab/page.
   useEffect(() => {
     if (!isOpen) {
-      if (isHistoryPushedRef.current) {
-        isHistoryPushedRef.current = false;
+      if (pushedHistoryRef.current) {
+        pushedHistoryRef.current = false;
         try {
+          isClosingModalHistoryCleanup = true;
           window.history.back();
+          setTimeout(() => {
+            isClosingModalHistoryCleanup = false;
+          }, 150);
         } catch {
-          // ignore
+          isClosingModalHistoryCleanup = false;
         }
       }
       return;
     }
 
-    // Modal just opened: push history entry
-    if (!isHistoryPushedRef.current) {
+    if (!pushedHistoryRef.current) {
       try {
-        window.history.pushState({ isAppModal: true, time: Date.now() }, '');
-        isHistoryPushedRef.current = true;
+        window.history.pushState({ isAppModal: true, timestamp: Date.now() }, '');
+        pushedHistoryRef.current = true;
       } catch {
         // ignore
       }
     }
 
     const handlePopState = () => {
-      if (isHistoryPushedRef.current) {
-        // Handled by browser/phone back gesture: mark as consumed so we don't call history.back() again
-        isHistoryPushedRef.current = false;
+      if (pushedHistoryRef.current) {
+        pushedHistoryRef.current = false;
         onCloseRef.current();
       }
     };
 
-    const handleAppModalClose = (e: Event) => {
-      e.preventDefault();
-      onCloseRef.current();
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onCloseRef.current();
+      }
     };
 
     window.addEventListener('popstate', handlePopState);
-    window.addEventListener('app-modal-close', handleAppModalClose);
+    window.addEventListener('keydown', handleKeyDown);
 
     return () => {
       window.removeEventListener('popstate', handlePopState);
-      window.removeEventListener('app-modal-close', handleAppModalClose);
-      if (isHistoryPushedRef.current) {
-        isHistoryPushedRef.current = false;
+      window.removeEventListener('keydown', handleKeyDown);
+      if (pushedHistoryRef.current) {
+        pushedHistoryRef.current = false;
         try {
+          isClosingModalHistoryCleanup = true;
           window.history.back();
+          setTimeout(() => {
+            isClosingModalHistoryCleanup = false;
+          }, 150);
         } catch {
-          // ignore
+          isClosingModalHistoryCleanup = false;
         }
       }
     };
   }, [isOpen]);
 
-  // 2. Global Touch Listeners on Window when modal is open
-  // Allows swiping from screen edges or across modal to close it seamlessly
+  // 3. TOUCH SWIPE DETECTION (EDGE-SWIPE & HORIZONTAL DISMISS SWIPE):
   useEffect(() => {
     if (!isOpen) return;
 
-    const handleWindowTouchStart = (e: TouchEvent) => {
+    const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 1) {
         const touch = e.touches[0];
         const target = touch.target as HTMLElement | null;
@@ -98,43 +194,51 @@ export function useSwipeToCloseModal({ isOpen, onClose }: UseSwipeToCloseModalOp
       }
     };
 
-    const handleWindowTouchEnd = (e: TouchEvent) => {
+    const handleTouchEnd = (e: TouchEvent) => {
       if (!touchStartRef.current || e.changedTouches.length === 0) return;
       const touch = e.changedTouches[0];
-      const startInfo = touchStartRef.current;
+      const start = touchStartRef.current;
       touchStartRef.current = null;
 
-      const diffX = touch.clientX - startInfo.x;
-      const diffY = touch.clientY - startInfo.y;
+      const diffX = touch.clientX - start.x;
+      const diffY = touch.clientY - start.y;
       const absX = Math.abs(diffX);
       const absY = Math.abs(diffY);
-      const duration = Date.now() - startInfo.time;
-      const windowWidth = window.innerWidth;
+      const duration = Date.now() - start.time;
+      const screenWidth = window.innerWidth;
 
-      // Filter out slow drags or vertical scrolls
-      if (duration > 850) return;
-      if (absX < 40 || absX < absY * 1.15) return;
+      // Filter non-horizontal or slow drags
+      if (duration > 800) return;
+      if (absX < 45 || absX < absY * 1.15) return;
 
-      // If started inside input, allow if swipe started near edge or is significant
-      if (startInfo.isInput) {
-        const isNearEdge = startInfo.x < 55 || startInfo.x > windowWidth - 55;
-        if (!isNearEdge && absX < 90) return;
+      // Left-to-right swipe (Back gesture) OR Right-to-left from right edge:
+      const isSwipeRight = diffX > 40;
+      const isFromLeftEdge = start.x < 65;
+      const isFromRightEdge = start.x > screenWidth - 65;
+      const isBackGesture = isSwipeRight || isFromLeftEdge || (diffX < -40 && isFromRightEdge);
+
+      if (!isBackGesture) return;
+
+      // If started inside an input, only trigger if it started near screen edge or travel is large
+      if (start.isInput) {
+        const nearEdge = start.x < 65 || start.x > screenWidth - 65;
+        if (!nearEdge && absX < 85) return;
       }
 
-      // Valid horizontal swipe gesture: close modal and return to previous screen
       onCloseRef.current();
     };
 
-    window.addEventListener('touchstart', handleWindowTouchStart, { passive: true });
-    window.addEventListener('touchend', handleWindowTouchEnd, { passive: true });
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: true });
 
     return () => {
-      window.removeEventListener('touchstart', handleWindowTouchStart);
-      window.removeEventListener('touchend', handleWindowTouchEnd);
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchend', handleTouchEnd);
     };
   }, [isOpen]);
 
   const onTouchStart = (e: React.TouchEvent) => {
+    if (!isOpen) return;
     if (e.touches.length === 1) {
       touchStartRef.current = {
         x: e.touches[0].clientX,
@@ -146,13 +250,19 @@ export function useSwipeToCloseModal({ isOpen, onClose }: UseSwipeToCloseModalOp
   };
 
   const onTouchEnd = (e: React.TouchEvent) => {
-    if (!touchStartRef.current || e.changedTouches.length === 0) return;
+    if (!isOpen || !touchStartRef.current || e.changedTouches.length === 0) return;
     const touch = e.changedTouches[0];
     const diffX = touch.clientX - touchStartRef.current.x;
     const diffY = touch.clientY - touchStartRef.current.y;
+    const duration = Date.now() - touchStartRef.current.time;
+    const absX = Math.abs(diffX);
+    const absY = Math.abs(diffY);
     touchStartRef.current = null;
 
-    if (Math.abs(diffX) > 40 && Math.abs(diffX) > Math.abs(diffY) * 1.15) {
+    if (duration > 750) return;
+    if (absX < 45 || absX < absY * 1.15) return;
+
+    if (diffX > 40) {
       onCloseRef.current();
     }
   };
@@ -164,3 +274,4 @@ export function useSwipeToCloseModal({ isOpen, onClose }: UseSwipeToCloseModalOp
     },
   };
 }
+

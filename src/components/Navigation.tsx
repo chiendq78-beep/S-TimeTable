@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { ActiveTab, Language, StudentProfile } from '../types';
 import { translations } from '../i18n/translations';
+import { useSwipeToCloseModal } from '../hooks/useSwipeToCloseModal';
 
 interface NavigationProps {
   activeTab: ActiveTab;
@@ -58,6 +59,11 @@ export const Navigation: React.FC<NavigationProps> = ({
   onCloseMobile,
 }) => {
   const t = translations[lang];
+
+  const { modalTouchHandlers: drawerTouchHandlers } = useSwipeToCloseModal({
+    isOpen: isMobileOpen,
+    onClose: onCloseMobile || (() => {}),
+  });
 
   const items: NavItem[] = [
     {
@@ -357,7 +363,7 @@ export const Navigation: React.FC<NavigationProps> = ({
 
       {/* 2. MOBILE OVERLAY VERTICAL DRAWER MENU */}
       {isMobileOpen && (
-        <div data-mobile-drawer="true" className="fixed inset-0 z-50 flex">
+        <div data-mobile-drawer="true" {...drawerTouchHandlers} className="fixed inset-0 z-50 flex">
           {/* Backdrop */}
           <div
             className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"

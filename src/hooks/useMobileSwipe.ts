@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ActiveTab, Language } from '../types';
+import { hasOpenModal, closeTopModal } from './useSwipeToCloseModal';
+import { App as CapApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 
 interface UseMobileSwipeOptions {
   activeTab: ActiveTab;
@@ -81,15 +84,15 @@ export function useMobileSwipe({
     }, 1100);
   };
 
-  // Helper to check if any modal is currently visible in the DOM
+  // Helper to check if any modal is currently visible
   const checkHasOpenModal = (): boolean => {
+    if (hasOpenModal()) return true;
     const modalContainers = document.querySelectorAll(
       '.fixed.inset-0.z-50, [role="dialog"], [data-app-modal="true"]'
     );
     // Ignore the mobile navigation drawer if it's separate
     for (let i = 0; i < modalContainers.length; i++) {
       const el = modalContainers[i] as HTMLElement;
-      // If element is not display: none and inside viewport
       if (
         el &&
         !el.closest('#mobile-nav-drawer') &&
@@ -102,70 +105,17 @@ export function useMobileSwipe({
     return false;
   };
 
-  // Close top modal function
+  // Close top modal function (Tier 1)
   const tryCloseTopModal = (): boolean => {
-    // 1. Dispatch custom event for custom-handled modals
-    const closeEvt = new CustomEvent('app-modal-close', {
-      bubbles: true,
-      cancelable: true,
-    });
-    const dispatched = window.dispatchEvent(closeEvt);
-
-    if (closeEvt.defaultPrevented) {
-      showFeedback(lang === 'vi' ? 'Đã đóng' : 'Closed', 'close');
+    const tabName = TAB_NAMES[lang][activeTab] || activeTab;
+    const closed = closeTopModal();
+    if (closed) {
+      showFeedback(
+        lang === 'vi' ? `Quay lại: ${tabName}` : `Back to: ${tabName}`,
+        'back'
+      );
       return true;
     }
-
-    // 2. Fallback: Find close/cancel button inside any open modal
-    const closeSelectors = [
-      '.fixed.inset-0.z-50 button[title*="Đóng"]',
-      '.fixed.inset-0.z-50 button[title*="Hủy"]',
-      '.fixed.inset-0.z-50 button[title*="Close"]',
-      '.fixed.inset-0.z-50 button[title*="Cancel"]',
-      '.fixed.inset-0.z-50 button[aria-label*="close" i]',
-      '.fixed.inset-0.z-50 button[aria-label*="đóng" i]',
-      '[role="dialog"] button[title*="Đóng"]',
-      '[role="dialog"] button[title*="Hủy"]',
-      '[role="dialog"] button[title*="Close"]',
-      '[role="dialog"] button[aria-label*="close" i]',
-    ];
-
-    for (const selector of closeSelectors) {
-      const btn = document.querySelector<HTMLButtonElement>(selector);
-      if (btn) {
-        btn.click();
-        showFeedback(lang === 'vi' ? 'Đã đóng' : 'Closed', 'close');
-        return true;
-      }
-    }
-
-    // 3. Fallback: Check for buttons with text like 'Đóng', 'Hủy', 'Close', 'Cancel'
-    const modalButtons = document.querySelectorAll<HTMLButtonElement>(
-      '.fixed.inset-0.z-50 button, [data-app-modal="true"] button, [role="dialog"] button'
-    );
-    for (let i = 0; i < modalButtons.length; i++) {
-      const btn = modalButtons[i];
-      const text = (btn.textContent || '').trim().toLowerCase();
-      if (text === 'đóng' || text === 'hủy' || text === 'close' || text === 'cancel') {
-        btn.click();
-        showFeedback(lang === 'vi' ? 'Đã đóng' : 'Closed', 'close');
-        return true;
-      }
-    }
-
-    // 4. Fallback: Check for any button with SVG X icon inside modal header
-    const modalOverlay = document.querySelector('.fixed.inset-0.z-50, [data-app-modal="true"]');
-    if (modalOverlay) {
-      const headerCloseBtn = modalOverlay.querySelector<HTMLButtonElement>(
-        'header button, [class*="border-b"] button, .shrink-0 button, button.shrink-0'
-      );
-      if (headerCloseBtn) {
-        headerCloseBtn.click();
-        showFeedback(lang === 'vi' ? 'Đã đóng' : 'Closed', 'close');
-        return true;
-      }
-    }
-
     return false;
   };
 
@@ -249,53 +199,41 @@ export function useMobileSwipe({
         }
       }
 
-      // ACTION 2: IF ANY MODAL IS OPEN (e.g. Thêm Tiết Học, Thêm Lớp Học Thêm, Thêm Bài Tập, Thêm Môn Học)
-      // Both swipe left and swipe right close the modal and return to previous page!
+      // ACTION 2: TIER 1 - IF ANY MODAL IS OPEN (e.g. Thêm Lớp Học Thêm, Thêm Bài Tập, Lịch Thi, v.v.)
+      // Left edge swipe or Back gesture closes the active modal and returns to the parent menu/page!
       if (checkHasOpenModal()) {
-        tryCloseTopModal();
+        if (isSwipeRight || isFromLeftEdge || isFromRightEdge) {
+          tryCloseTopModal();
+        }
         return; // Always stop here; never switch tabs underneath an active modal
       }
 
-      // ACTION 3: MAIN VIEW PAGE NAVIGATION (Quay lại trang trước như điện thoại)
-      // On mobile phones:
-      // - Swipe Right (left-to-right) is the standard BACK gesture on iOS and Android.
-      // - Swipe Left from the Right Edge is the native Android BACK gesture.
+      // ACTION 3: 3-TIER NAVIGATION HIERARCHY
+      // - Tier 2 (Secondary Views & Sub-Tabs):
+      //   When on any secondary tab (extra_class, exams, homework, grades, notices, profile, system, notifications):
+      //   Swipe from left edge or Back gesture ALWAYS returns to the Root Menu ('timetable' - Thời Khóa Biểu)!
+      // - Tier 3 (Root Menu: timetable):
+      //   Back gesture smoothly exits the application via CapApp.exitApp() on Android.
       const isBackGesture =
-        isSwipeRight || (isSwipeLeft && isFromRightEdge);
+        isSwipeRight || (isSwipeLeft && isFromRightEdge) || isFromLeftEdge;
 
       if (isBackGesture) {
-        // Check tab history first
-        const prevTab = onPopHistory();
-        if (prevTab) {
-          const tabName = TAB_NAMES[lang][prevTab] || prevTab;
+        if (activeTab !== 'timetable') {
+          onNavigateTab('timetable');
           showFeedback(
-            lang === 'vi' ? `Quay lại: ${tabName}` : `Back to: ${tabName}`,
+            lang === 'vi' ? 'Quay lại: Thời Khóa Biểu' : 'Back to: Timetable',
             'back'
           );
           return;
         }
 
-        // If no history, move to previous tab in order
-        const currIdx = TAB_ORDER.indexOf(activeTab);
-        if (currIdx > 0) {
-          const targetTab = TAB_ORDER[currIdx - 1];
-          onNavigateTab(targetTab);
-          const tabName = TAB_NAMES[lang][targetTab] || targetTab;
+        // On Root Menu ('timetable'):
+        if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+          CapApp.exitApp();
+        } else {
           showFeedback(
-            lang === 'vi' ? `Quay lại: ${tabName}` : `Back to: ${tabName}`,
+            lang === 'vi' ? 'Thời Khóa Biểu (Trang chính)' : 'Timetable (Home)',
             'back'
-          );
-        }
-      } else if (isSwipeLeft && !isFromRightEdge) {
-        // Swiping Left across page moves forward to next tab
-        const currIdx = TAB_ORDER.indexOf(activeTab);
-        if (currIdx < TAB_ORDER.length - 1) {
-          const targetTab = TAB_ORDER[currIdx + 1];
-          onNavigateTab(targetTab);
-          const tabName = TAB_NAMES[lang][targetTab] || targetTab;
-          showFeedback(
-            lang === 'vi' ? `Đến: ${tabName}` : `Next: ${tabName}`,
-            'forward'
           );
         }
       }

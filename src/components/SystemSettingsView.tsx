@@ -17,6 +17,7 @@ import { Language, Theme } from '../types';
 import { translations } from '../i18n/translations';
 import { NotificationService } from '../services/notification';
 import { StorageService } from '../services/storage';
+import { useSwipeToCloseModal } from '../hooks/useSwipeToCloseModal';
 
 interface SystemSettingsViewProps {
   theme: Theme;
@@ -37,6 +38,10 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
 }) => {
   const t = translations[lang];
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const { modalTouchHandlers } = useSwipeToCloseModal({
+    isOpen: isResetModalOpen,
+    onClose: () => setIsResetModalOpen(false),
+  });
   const [hasNotificationPerm, setHasNotificationPerm] = useState(() => {
     return typeof window !== 'undefined' && 'Notification' in window
       ? Notification.permission === 'granted'
@@ -378,7 +383,10 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
 
       {/* Modal Confirm Reset */}
       {isResetModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+        <div
+          {...modalTouchHandlers}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
+        >
           <div className="bg-white dark:bg-gray-900 rounded-2xl p-5 sm:p-6 max-w-sm w-full border border-gray-200 dark:border-gray-800 shadow-2xl space-y-4">
             <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 flex items-center justify-center mx-auto">
               <RotateCcw className="w-6 h-6" />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ActiveTab,
   Language,
@@ -28,9 +28,16 @@ import { NoticesView } from './components/NoticesView';
 import { StudentProfileView } from './components/StudentProfileView';
 import { SystemSettingsView } from './components/SystemSettingsView';
 import { NotificationCenterView } from './components/NotificationCenterView';
-import { GestureFeedbackIndicator } from './components/GestureFeedbackIndicator';
-import { useMobileSwipe } from './hooks/useMobileSwipe';
 import { WifiOff, CheckCircle2, AlertCircle } from 'lucide-react';
+import { App as CapApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
+import { useMobileSwipe } from './hooks/useMobileSwipe';
+import { GestureFeedbackIndicator } from './components/GestureFeedbackIndicator';
+import {
+  hasOpenModal,
+  closeTopModal,
+  isModalHistoryCleaning,
+} from './hooks/useSwipeToCloseModal';
 
 export default function App() {
   // Application State
@@ -62,33 +69,129 @@ export default function App() {
   });
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState<boolean>(false);
 
-  // Tab navigation history for mobile/tablet back swipe gesture
-  const [tabHistory, setTabHistory] = useState<ActiveTab[]>([]);
+  // Navigation history across top-level views
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+
+  const isDrawerOpenRef = useRef(isMobileDrawerOpen);
+  isDrawerOpenRef.current = isMobileDrawerOpen;
 
   const handleNavigateTab = (newTab: ActiveTab) => {
-    if (newTab === activeTab) return;
-    setTabHistory((prev) => [...prev, activeTab]);
     setActiveTab(newTab);
   };
 
-  const handlePopHistory = (): ActiveTab | null => {
-    if (tabHistory.length === 0) return null;
-    const prevTab = tabHistory[tabHistory.length - 1];
-    setTabHistory((prev) => prev.slice(0, -1));
-    setActiveTab(prevTab);
-    return prevTab;
-  };
-
-  // Mobile & Tablet swipe gestures for native-like back / close / navigation
-  const { feedback: gestureFeedback } = useMobileSwipe({
+  // Mobile edge-swipe gesture listener for back navigation
+  const { feedback } = useMobileSwipe({
     activeTab,
-    tabHistory,
+    tabHistory: [],
     onNavigateTab: handleNavigateTab,
-    onPopHistory: handlePopHistory,
+    onPopHistory: () => null,
     isMobileDrawerOpen,
     onCloseMobileDrawer: () => setIsMobileDrawerOpen(false),
     lang,
   });
+
+  // 3-Tier Back button & gesture management for root navigation:
+  // - Tier 1: If any modal/form is open: close modal and stay on current tab/page.
+  // - Tier 1b: If mobile drawer is open: close drawer.
+  // - Tier 2: If on a secondary tab (e.g. homework, exams, extra_class, system): back returns to root menu ('timetable').
+  // - Tier 3: If already on root menu ('timetable'): back exits/closes the app via CapApp.exitApp().
+  useEffect(() => {
+    let isCleanedUp = false;
+    let listenerHandle: { remove: () => void } | null = null;
+
+    if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+      CapApp.addListener('backButton', () => {
+        // Tier 1: Check if any modal is active
+        if (hasOpenModal()) {
+          closeTopModal();
+          return;
+        }
+
+        // Tier 1b: Mobile navigation drawer
+        if (isDrawerOpenRef.current) {
+          setIsMobileDrawerOpen(false);
+          return;
+        }
+
+        // Tier 2: Secondary tab -> return to root menu ('timetable')
+        if (activeTabRef.current !== 'timetable') {
+          setActiveTab('timetable');
+          return;
+        }
+
+        // Tier 3: On root menu: exit application
+        CapApp.exitApp();
+      })
+        .then((handle) => {
+          if (isCleanedUp) {
+            handle.remove();
+          } else {
+            listenerHandle = handle;
+          }
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      isCleanedUp = true;
+      if (listenerHandle) {
+        listenerHandle.remove();
+      }
+    };
+  }, []);
+
+  // Web / PWA popstate history handling:
+  useEffect(() => {
+    // Push history state whenever switching away from root 'timetable'
+    if (activeTab !== 'timetable') {
+      try {
+        window.history.pushState({ tab: activeTab }, '');
+      } catch {
+        // ignore
+      }
+    }
+
+    const handlePopState = (e: PopStateEvent) => {
+      // 0. If modal cleanup triggered this popstate, ignore it completely
+      if (isModalHistoryCleaning()) {
+        return;
+      }
+
+      // 1. Tier 1: If any modal is active when Back was pressed, close it and stay on current tab
+      if (hasOpenModal()) {
+        closeTopModal();
+        return;
+      }
+
+      // 2. Tier 1b: If mobile drawer is open, close it
+      if (isDrawerOpenRef.current) {
+        setIsMobileDrawerOpen(false);
+        return;
+      }
+
+      // 3. If popped state belongs to the current tab, stay here
+      if (e.state?.tab && e.state.tab === activeTabRef.current) {
+        return;
+      }
+
+      // 4. If popped state specifies another tab, switch to it
+      if (e.state?.tab) {
+        setActiveTab(e.state.tab);
+        return;
+      }
+
+      // 5. Tier 2: Secondary tab -> return to root menu ('timetable')
+      if (activeTabRef.current !== 'timetable') {
+        setActiveTab('timetable');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [activeTab]);
 
   const handleToggleSidebar = () => {
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -226,8 +329,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Gesture Feedback Indicator on Mobile/Tablet Swipe */}
-      <GestureFeedbackIndicator feedback={gestureFeedback} />
 
       {/* Main Application Container */}
       <div className="grow flex flex-col w-full">
@@ -368,6 +469,9 @@ export default function App() {
         </main>
         </div>
       </div>
+
+      {/* Floating touch gesture feedback pill */}
+      <GestureFeedbackIndicator feedback={feedback} />
     </div>
   );
 }
