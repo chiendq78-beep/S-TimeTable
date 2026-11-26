@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
-  NotebookPen,
+  ScrollText,
   Plus,
   Edit2,
   Trash2,
@@ -13,68 +13,92 @@ import {
   Timer,
   ChevronDown,
   ChevronRight,
-  Table as TableIcon,
-  LayoutGrid,
-  ChevronsUpDown,
-  ChevronsDownUp,
   X,
   Sparkles,
   Check,
   Save,
-  Search,
+  AlertTriangle,
+  CheckCircle2,
 } from 'lucide-react';
-import { ExamItem, ExamFormat, Language } from '../types';
+import { ExamItem, ExamFormat, Language, SubjectItem } from '../types';
 import { translations } from '../i18n/translations';
 import { useSwipeToCloseModal } from '../hooks/useSwipeToCloseModal';
-
-const PRESET_SUBJECTS = [
-  'Toán học',
-  'Ngữ văn',
-  'Tiếng Anh',
-  'Vật lý',
-  'Hóa học',
-  'Sinh học',
-  'Lịch sử',
-  'Địa lý',
-  'Tin học',
-  'GDCD / Kinh tế & Pháp luật',
-  'Công nghệ',
-  'GDQP & An ninh',
-];
+import { StorageService } from '../services/storage';
+import { SubjectCombobox } from './SubjectCombobox';
 
 interface ExamScheduleViewProps {
   exams: ExamItem[];
   onSaveExams: (items: ExamItem[]) => void;
   lang: Language;
+  openDetailId?: string;
+  openDetailSubject?: string;
+  onClearOpenDetailId?: () => void;
+  subjects?: SubjectItem[];
 }
 
 export const ExamScheduleView: React.FC<ExamScheduleViewProps> = ({
   exams,
   onSaveExams,
   lang,
+  openDetailId,
+  openDetailSubject,
+  onClearOpenDetailId,
+  subjects,
 }) => {
   const t = translations[lang];
-  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [editingItem, setEditingItem] = useState<ExamItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [collapsedSubjects, setCollapsedSubjects] = useState<Record<string, boolean>>({});
-  const [openSubjectMenu, setOpenSubjectMenu] = useState<string | null>(null);
   const [reviewPopupItem, setReviewPopupItem] = useState<ExamItem | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<ExamItem | null>(null);
+  const [isDeleteAllPassedOpen, setIsDeleteAllPassedOpen] = useState(false);
+  const [targetEditItem, setTargetEditItem] = useState<ExamItem | null>(null);
+  const [targetScoreInput, setTargetScoreInput] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<'upcoming' | 'passed'>('upcoming');
+  const [isPassedCollapsed, setIsPassedCollapsed] = useState(false);
 
-  // Swipe-to-close on mobile/tablet
+  // Automatically open detail / edit modal when navigated from notification
+  useEffect(() => {
+    if (openDetailId || openDetailSubject) {
+      const target =
+        (openDetailId && exams.find((e) => e.id === openDetailId)) ||
+        (openDetailSubject &&
+          exams.find(
+            (e) => e.subject.toLowerCase() === openDetailSubject.toLowerCase()
+          ));
+      if (target) {
+        setEditingItem(target);
+        setIsModalOpen(true);
+      }
+      if (onClearOpenDetailId) {
+        onClearOpenDetailId();
+      }
+    }
+  }, [openDetailId, openDetailSubject, exams, onClearOpenDetailId]);
+
+  // Swipe-to-close on mobile/tablet (handles edit modal, review popup, target score modal, and confirm delete modals)
   const { modalTouchHandlers } = useSwipeToCloseModal({
-    isOpen: isModalOpen || !!reviewPopupItem,
+    isOpen:
+      isModalOpen ||
+      !!reviewPopupItem ||
+      itemToDelete !== null ||
+      isDeleteAllPassedOpen ||
+      targetEditItem !== null,
     onClose: () => {
-      setIsModalOpen(false);
-      setEditingItem(null);
-      setReviewPopupItem(null);
+      if (targetEditItem) {
+        setTargetEditItem(null);
+      } else if (isDeleteAllPassedOpen) {
+        setIsDeleteAllPassedOpen(false);
+      } else if (itemToDelete) {
+        setItemToDelete(null);
+      } else if (reviewPopupItem) {
+        setReviewPopupItem(null);
+      } else {
+        setIsModalOpen(false);
+        setEditingItem(null);
+      }
     },
   });
   const [hoveredTopicId, setHoveredTopicId] = useState<string | null>(null);
-
-  // States for searchable Subject select dropdown
-  const [subjectQuery, setSubjectQuery] = useState('');
-  const [isSubjectDropdownOpen, setIsSubjectDropdownOpen] = useState(false);
 
   // Helper to format date YYYY-MM-DD -> DD/MM/YYYY
   const formatDateVN = (dateStr: string) => {
@@ -102,50 +126,113 @@ export const ExamScheduleView: React.FC<ExamScheduleViewProps> = ({
     }
   };
 
-  // Helper to calculate days remaining
-  const getDaysRemaining = (dateStr: string, timeStr: string) => {
-    const examTime = new Date(`${dateStr}T${timeStr}:00`).getTime();
-    const now = new Date().getTime();
-    const diffMs = examTime - now;
-    if (diffMs < 0) {
-      // Check if same day
-      const examDate = new Date(dateStr).toDateString();
-      const today = new Date().toDateString();
-      return examDate === today ? 0 : -1;
-    }
-    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    return days;
+  // Helper to parse date & time into local timestamp reliably
+  const getExamTimestamp = (dateStr: string, timeStr = '00:00'): number => {
+    if (!dateStr) return NaN;
+    const dateParts = dateStr.split('-');
+    if (dateParts.length !== 3) return NaN;
+    const y = parseInt(dateParts[0], 10);
+    const m = parseInt(dateParts[1], 10);
+    const d = parseInt(dateParts[2], 10);
+    const timeParts = (timeStr || '00:00').split(':');
+    const h = parseInt(timeParts[0], 10) || 0;
+    const min = parseInt(timeParts[1], 10) || 0;
+    return new Date(y, m - 1, d, h, min, 0, 0).getTime();
   };
 
-  // All available subjects combining preset and user-created
+  // Helper to check if an exam has passed / is completed
+  const isExamPassed = (item: ExamItem): boolean => {
+    if (item.isCompleted) return true;
+    if (!item.examDate) return false;
+    const duration = item.durationMinutes || 60;
+    const examStart = getExamTimestamp(item.examDate, item.timeStart || '23:59');
+    if (isNaN(examStart)) return false;
+    const examEnd = examStart + duration * 60 * 1000;
+    return examEnd < Date.now();
+  };
+
+  // Helper to calculate calendar days remaining (strictly matching calendar dates)
+  const getDaysRemaining = (dateStr: string, timeStr?: string, durationMinutes = 60) => {
+    if (!dateStr) return -1;
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return -1;
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const d = parseInt(parts[2], 10);
+    if (isNaN(y) || isNaN(m) || isNaN(d)) return -1;
+
+    const now = new Date();
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+    const examMidnight = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+
+    const calendarDaysDiff = Math.round((examMidnight - todayMidnight) / (1000 * 60 * 60 * 24));
+
+    // If calendar date is in the past
+    if (calendarDaysDiff < 0) {
+      return -1;
+    }
+
+    // If calendar date is TODAY (0)
+    if (calendarDaysDiff === 0) {
+      const examStart = getExamTimestamp(dateStr, timeStr || '23:59');
+      const examEnd = examStart + (durationMinutes || 60) * 60 * 1000;
+      if (!isNaN(examEnd) && examEnd < now.getTime()) {
+        return -1; // already ended today
+      }
+      return 0; // Exam is today!
+    }
+
+    // Future days (1 for tomorrow, 2, 3...)
+    return calendarDaysDiff;
+  };
+
+  // All available subjects combining system subjects and exams
   const availableSubjects = useMemo(() => {
-    const set = new Set<string>(PRESET_SUBJECTS);
+    const list = subjects && subjects.length > 0 ? subjects : StorageService.getSubjects();
+    const set = new Set<string>(list.map((s) => s.name));
     exams.forEach((ex) => {
       if (ex.subject && ex.subject.trim()) {
         set.add(ex.subject.trim());
       }
     });
     return Array.from(set);
-  }, [exams]);
+  }, [exams, subjects]);
 
-  // Filtered subjects for autocomplete combobox
-  const matchingSubjects = useMemo(() => {
-    const q = subjectQuery.trim().toLowerCase();
-    if (!q) return availableSubjects;
-    return availableSubjects.filter((s) => s.toLowerCase().includes(q));
-  }, [availableSubjects, subjectQuery]);
+  // Toggle completed status manually
+  const handleToggleComplete = (item: ExamItem, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const currentlyPassed = isExamPassed(item);
+    const updated = exams.map((ex) =>
+      ex.id === item.id ? { ...ex, isCompleted: !currentlyPassed } : ex
+    );
+    onSaveExams(updated);
+  };
 
-  const handleDelete = (id: string) => {
-    onSaveExams(exams.filter((i) => i.id !== id));
-    if (reviewPopupItem?.id === id) {
+  // Delete with confirmation
+  const handleDeleteClick = (item: ExamItem) => {
+    setItemToDelete(item);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!itemToDelete) return;
+    onSaveExams(exams.filter((i) => i.id !== itemToDelete.id));
+    if (reviewPopupItem?.id === itemToDelete.id) {
       setReviewPopupItem(null);
     }
+    setItemToDelete(null);
+  };
+
+  const handleConfirmDeleteAllPassed = () => {
+    const remaining = exams.filter((i) => !isExamPassed(i));
+    onSaveExams(remaining);
+    if (reviewPopupItem && isExamPassed(reviewPopupItem)) {
+      setReviewPopupItem(null);
+    }
+    setIsDeleteAllPassedOpen(false);
   };
 
   const handleOpenAdd = (defaultSubject?: string) => {
     const sub = defaultSubject || '';
-    setSubjectQuery(sub);
-    setIsSubjectDropdownOpen(false);
     setEditingItem({
       id: `exam-${Date.now()}`,
       subject: sub,
@@ -158,14 +245,13 @@ export const ExamScheduleView: React.FC<ExamScheduleViewProps> = ({
       format: 'multiple_choice',
       reviewTopics: '',
       targetScore: 9.5,
+      isCompleted: false,
     });
     setIsModalOpen(true);
   };
 
   const handleOpenEdit = (item: ExamItem) => {
     setEditingItem({ ...item });
-    setSubjectQuery(item.subject || '');
-    setIsSubjectDropdownOpen(false);
     setIsModalOpen(true);
   };
 
@@ -183,6 +269,31 @@ export const ExamScheduleView: React.FC<ExamScheduleViewProps> = ({
     setEditingItem(null);
   };
 
+  const handleOpenTargetEdit = (item: ExamItem, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setTargetEditItem(item);
+    setTargetScoreInput(item.targetScore !== undefined ? String(item.targetScore) : '');
+  };
+
+  const handleSaveTargetEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetEditItem) return;
+    const trimmed = targetScoreInput.trim().replace(',', '.');
+    let parsedScore: number | undefined = undefined;
+    if (trimmed !== '') {
+      const num = Number(trimmed);
+      if (!Number.isNaN(num)) {
+        parsedScore = Math.min(10, Math.max(0, Math.round(num * 100) / 100));
+      }
+    }
+    onSaveExams(
+      exams.map((ex) =>
+        ex.id === targetEditItem.id ? { ...ex, targetScore: parsedScore } : ex
+      )
+    );
+    setTargetEditItem(null);
+  };
+
   const formatLabels: Record<ExamFormat, string> = {
     essay: t.exams.formats.essay,
     multiple_choice: t.exams.formats.multiple_choice,
@@ -190,692 +301,475 @@ export const ExamScheduleView: React.FC<ExamScheduleViewProps> = ({
     practice: t.exams.formats.practice,
   };
 
-  const formatBadges: Record<ExamFormat, { bg: string; text: string; border: string }> = {
-    multiple_choice: {
-      bg: 'bg-purple-50 dark:bg-purple-950/40',
-      text: 'text-purple-700 dark:text-purple-300',
-      border: 'border-purple-200 dark:border-purple-800/60',
-    },
-    essay: {
-      bg: 'bg-amber-50 dark:bg-amber-950/40',
-      text: 'text-amber-700 dark:text-amber-300',
-      border: 'border-amber-200 dark:border-amber-800/60',
-    },
-    oral: {
-      bg: 'bg-sky-50 dark:bg-sky-950/40',
-      text: 'text-sky-700 dark:text-sky-300',
-      border: 'border-sky-200 dark:border-sky-800/60',
-    },
-    practice: {
-      bg: 'bg-emerald-50 dark:bg-emerald-950/40',
-      text: 'text-emerald-700 dark:text-emerald-300',
-      border: 'border-emerald-200 dark:border-emerald-800/60',
-    },
-  };
+  // Split exams into Upcoming & Passed
+  const { upcomingExams, passedExams } = useMemo(() => {
+    const upcoming: ExamItem[] = [];
+    const passed: ExamItem[] = [];
 
-  // Group exams by Subject
-  const groupedExams = useMemo(() => {
-    const map: Record<string, ExamItem[]> = {};
     exams.forEach((item) => {
-      const key = item.subject.trim() || (lang === 'vi' ? 'Môn khác' : 'Other');
-      if (!map[key]) map[key] = [];
-      map[key].push(item);
+      if (isExamPassed(item)) {
+        passed.push(item);
+      } else {
+        upcoming.push(item);
+      }
     });
 
-    // Sort items within each subject by date & time
-    Object.keys(map).forEach((sub) => {
-      map[sub].sort(
-        (a, b) =>
-          new Date(`${a.examDate}T${a.timeStart}`).getTime() -
-          new Date(`${b.examDate}T${b.timeStart}`).getTime()
-      );
-    });
-
-    // Sort subjects by earliest upcoming exam
-    const sortedSubjects = Object.keys(map).sort((subA, subB) => {
-      const earliestA = map[subA][0];
-      const earliestB = map[subB][0];
-      if (!earliestA) return 1;
-      if (!earliestB) return -1;
-      return (
-        new Date(`${earliestA.examDate}T${earliestA.timeStart}`).getTime() -
-        new Date(`${earliestB.examDate}T${earliestB.timeStart}`).getTime()
-      );
-    });
-
-    return { map, subjects: sortedSubjects };
-  }, [exams, lang]);
-
-  // Toggle single subject accordion
-  const toggleSubject = (subject: string) => {
-    setCollapsedSubjects((prev) => ({
-      ...prev,
-      [subject]: !prev[subject],
-    }));
-  };
-
-  // Collapse all or Expand all
-  const allCollapsed = groupedExams.subjects.length > 0 && groupedExams.subjects.every((s) => collapsedSubjects[s]);
-  const handleToggleAll = () => {
-    if (allCollapsed) {
-      setCollapsedSubjects({});
-    } else {
-      const nextState: Record<string, boolean> = {};
-      groupedExams.subjects.forEach((s) => {
-        nextState[s] = true;
-      });
-      setCollapsedSubjects(nextState);
-    }
-  };
-
-  // Sort by upcoming date for card view
-  const sortedExams = useMemo(() => {
-    return [...exams].sort(
+    // Upcoming: nearest first
+    upcoming.sort(
       (a, b) =>
-        new Date(`${a.examDate}T${a.timeStart}`).getTime() -
-        new Date(`${b.examDate}T${b.timeStart}`).getTime()
+        getExamTimestamp(a.examDate, a.timeStart) -
+        getExamTimestamp(b.examDate, b.timeStart)
     );
+
+    // Passed: most recently passed first
+    passed.sort(
+      (a, b) =>
+        getExamTimestamp(b.examDate, b.timeStart) -
+        getExamTimestamp(a.examDate, a.timeStart)
+    );
+
+    return { upcomingExams: upcoming, passedExams: passed };
   }, [exams]);
+
+  // Card renderer component
+  const renderExamCard = (item: ExamItem) => {
+    const isPassed = isExamPassed(item);
+    const daysLeft = getDaysRemaining(item.examDate, item.timeStart, item.durationMinutes);
+
+    return (
+      <div
+        key={item.id}
+        className={`rounded-2xl p-4 sm:p-5 border transition-all shadow-xs flex flex-col justify-between relative overflow-hidden ${
+          isPassed
+            ? 'opacity-65 hover:opacity-95 bg-gray-50/75 dark:bg-gray-850/50 border-gray-200/80 dark:border-gray-800'
+            : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 hover:border-rose-300 dark:hover:border-rose-900/60'
+        }`}
+      >
+        {/* Top Header: Subject & Exam Name + Status Badge */}
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div className="flex flex-col min-w-0 pr-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className={`text-sm sm:text-base font-extrabold truncate ${
+                  isPassed ? 'text-gray-700 dark:text-gray-300' : 'text-gray-950 dark:text-white'
+                }`}
+              >
+                {item.subject}
+              </span>
+              <span className="text-[11px] sm:text-xs px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 font-bold truncate border border-gray-200/70 dark:border-gray-700">
+                {item.examName}
+              </span>
+            </div>
+          </div>
+
+          {/* Status Badge */}
+          {isPassed ? (
+            <div className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-xl shrink-0 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>{lang === 'vi' ? 'Đã thi' : 'Passed'}</span>
+            </div>
+          ) : daysLeft === 0 ? (
+            <div className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-xl shrink-0 bg-rose-600 text-white animate-pulse shadow-xs">
+              <Timer className="w-3.5 h-3.5" />
+              <span>{t.exams.today}</span>
+            </div>
+          ) : daysLeft === 1 ? (
+            <div className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-xl shrink-0 bg-amber-500 text-white shadow-xs">
+              <Timer className="w-3.5 h-3.5" />
+              <span>{lang === 'vi' ? 'Ngày mai thi!' : 'Tomorrow!'}</span>
+            </div>
+          ) : daysLeft > 1 && daysLeft <= 3 ? (
+            <div className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-xl shrink-0 bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200 border border-amber-300 dark:border-amber-900/40">
+              <Timer className="w-3.5 h-3.5" />
+              <span>
+                {daysLeft} {lang === 'vi' ? 'ngày nữa' : 'days left'}
+              </span>
+            </div>
+          ) : daysLeft > 3 ? (
+            <div className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-xl shrink-0 bg-blue-50 text-blue-800 dark:bg-blue-950/40 dark:text-blue-200 border border-blue-200 dark:border-blue-900/40">
+              <Timer className="w-3.5 h-3.5" />
+              <span>
+                {daysLeft} {lang === 'vi' ? 'ngày nữa' : 'days left'}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-xl shrink-0 bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+              <Check className="w-3.5 h-3.5" />
+              <span>{t.exams.passed}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Exam Details */}
+        <div className="space-y-2 text-xs font-medium text-gray-800 dark:text-gray-200">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 sm:gap-x-4 gap-y-2">
+            {/* Hàng 1: Ngày thi (trái) & Giờ thi (phải) */}
+            <span className="flex items-center gap-1 font-bold text-gray-950 dark:text-white min-w-0">
+              <Calendar className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+              <span className="truncate">
+                {formatDateVN(item.examDate)} {getDayOfWeekVN(item.examDate) && `(${getDayOfWeekVN(item.examDate)})`}
+              </span>
+            </span>
+            <span className="flex items-center gap-1 font-semibold text-gray-800 dark:text-gray-100 whitespace-nowrap justify-self-start">
+              <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <span>{item.timeStart} ({item.durationMinutes} phút)</span>
+            </span>
+
+            {/* Hàng 2: Phòng thi (trái) & Số báo danh (phải) */}
+            {(item.room || item.candidateNumber) && (
+              <>
+                {item.room ? (
+                  <span className="flex items-center gap-1 font-semibold text-gray-800 dark:text-gray-100 min-w-0">
+                    <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="truncate">{item.room}</span>
+                  </span>
+                ) : (
+                  <span />
+                )}
+                {item.candidateNumber ? (
+                  <span className="flex items-center gap-1 text-gray-900 dark:text-gray-100 whitespace-nowrap justify-self-start">
+                    <IdCard className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span className="font-mono font-bold">{item.candidateNumber}</span>
+                  </span>
+                ) : (
+                  <span />
+                )}
+              </>
+            )}
+
+            {/* Hàng 3: Hình thức thi (trái) & Mục tiêu (phải) */}
+            <div className="min-w-0">
+              <span className="inline-flex px-2 py-0.5 rounded-md bg-purple-50 text-purple-800 dark:bg-purple-950/50 dark:text-purple-200 font-bold text-[11px] border border-purple-200/70 dark:border-purple-800/50 whitespace-nowrap">
+                {formatLabels[item.format]}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => handleOpenTargetEdit(item, e)}
+              className={`justify-self-start flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md border transition-colors cursor-pointer whitespace-nowrap ${
+                item.targetScore !== undefined
+                  ? 'text-emerald-800 dark:text-emerald-300 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800/50'
+                  : 'text-gray-700 dark:text-gray-300 bg-gray-100 hover:bg-emerald-50 hover:text-emerald-800 dark:bg-gray-800 dark:hover:bg-emerald-950/40 border-gray-200 dark:border-gray-700 hover:border-emerald-200'
+              }`}
+              title={lang === 'vi' ? 'Bấm để chỉnh sửa điểm mục tiêu' : 'Click to edit target score'}
+            >
+              <Target className="w-3 h-3 text-emerald-700 dark:text-emerald-400 shrink-0" />
+              <span>
+                {item.targetScore !== undefined
+                  ? `${lang === 'vi' ? 'Mục tiêu' : 'Target'}: ${item.targetScore}đ`
+                  : (lang === 'vi' ? 'Đặt mục tiêu' : 'Set target')}
+              </span>
+              <Edit2 className="w-2.5 h-2.5 opacity-70 shrink-0" />
+            </button>
+          </div>
+
+          {/* Review Topics */}
+          {item.reviewTopics && (
+            <div
+              onClick={() => setReviewPopupItem(item)}
+              className="mt-2 text-xs bg-gray-50 dark:bg-gray-850 p-2.5 rounded-xl border border-gray-200/80 dark:border-gray-700 cursor-pointer hover:border-indigo-300 dark:hover:border-indigo-700/60 transition-colors group/review"
+            >
+              <div className="font-bold text-gray-900 dark:text-white flex items-center justify-between gap-1 mb-0.5">
+                <div className="flex items-center gap-1">
+                  <BookOpen className="w-3 h-3 text-blue-600" />
+                  <span>{t.exams.reviewTopics}:</span>
+                </div>
+                <span className="text-[10px] text-indigo-700 dark:text-indigo-400 group-hover/review:underline font-semibold">
+                  Xem thêm
+                </span>
+              </div>
+              <p className="text-gray-800 dark:text-gray-200 font-medium leading-relaxed line-clamp-2">
+                {item.reviewTopics}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Bottom Actions */}
+        <div className="flex items-center justify-between pt-3 mt-3 border-t border-gray-100 dark:border-gray-800/80">
+          {/* Toggle complete button */}
+          <button
+            type="button"
+            onClick={(e) => handleToggleComplete(item, e)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+              isPassed
+                ? 'text-gray-700 dark:text-gray-300 hover:text-indigo-700 dark:hover:text-indigo-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/40'
+            }`}
+            title={isPassed ? 'Bấm để đánh dấu chưa thi' : 'Đánh dấu môn này đã thi xong'}
+          >
+            <Check className={`w-3.5 h-3.5 ${isPassed ? 'text-emerald-600' : 'text-emerald-700'}`} />
+            <span>
+              {isPassed
+                ? (lang === 'vi' ? 'Đã thi xong' : 'Completed')
+                : (lang === 'vi' ? 'Đánh dấu đã thi' : 'Mark as done')}
+            </span>
+          </button>
+
+          {/* Edit & Delete (with confirm) */}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => handleOpenEdit(item)}
+              className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-indigo-700 dark:hover:text-indigo-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+              title={t.common.edit}
+            >
+              <Edit2 className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDeleteClick(item)}
+              className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+              title={t.common.delete}
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-3.5 sm:space-y-4">
-      {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 bg-white dark:bg-gray-900 p-3 sm:p-4 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs">
-        <div className="shrink-0">
-          <h2 className="text-base sm:text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2 whitespace-nowrap">
-            <NotebookPen className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
+      {/* Header Bar: Title and Action Buttons */}
+      <div className="bg-white dark:bg-gray-900 p-3.5 sm:p-4 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs space-y-3">
+        <div>
+          <h2 className="text-base sm:text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+            <ScrollText className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
             {t.exams.title}
           </h2>
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap overflow-x-auto no-scrollbar">
-          {/* View Mode Switcher */}
-          <div className="flex items-center p-0.5 sm:p-1 bg-gray-100 dark:bg-gray-800/80 rounded-xl border border-gray-200 dark:border-gray-700/60 text-xs font-semibold shrink-0">
-            <button
-              onClick={() => setViewMode('table')}
-              className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap ${
-                viewMode === 'table'
-                  ? 'bg-white dark:bg-gray-900 text-rose-600 dark:text-rose-400 shadow-xs font-bold'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-              }`}
-              title={t.exams.tableView}
-            >
-              <TableIcon className="w-3.5 h-3.5 shrink-0" />
-              <span>{t.exams.tableView}</span>
-            </button>
-            <button
-              onClick={() => setViewMode('cards')}
-              className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg transition-all whitespace-nowrap ${
-                viewMode === 'cards'
-                  ? 'bg-white dark:bg-gray-900 text-rose-600 dark:text-rose-400 shadow-xs font-bold'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-              }`}
-              title={t.exams.cardView}
-            >
-              <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-              <span>{t.exams.cardView}</span>
-            </button>
-          </div>
-
+        {/* Action Row: Thêm (nền xanh) ở bên trái, Xóa ở lề bên phải */}
+        <div className="flex items-center justify-between gap-2 pt-1 border-t border-gray-100 dark:border-gray-800/60">
           <button
             id="add-exam-btn"
             onClick={() => handleOpenAdd()}
-            className="flex items-center gap-1 sm:gap-1.5 px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700 shadow-sm shadow-rose-500/20 transition-all active:scale-[0.98] shrink-0 whitespace-nowrap"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 shadow-sm shadow-blue-500/20 transition-all active:scale-[0.98] cursor-pointer"
           >
             <Plus className="w-4 h-4 shrink-0" />
             <span>{t.exams.addExam}</span>
           </button>
+
+          <button
+            type="button"
+            id="delete-all-passed-exams-btn"
+            onClick={() => setIsDeleteAllPassedOpen(true)}
+            disabled={passedExams.length === 0}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 dark:hover:bg-rose-900/50 border border-rose-200/80 dark:border-rose-800/60 shadow-xs transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            title={lang === 'vi' ? 'Xóa tất cả các danh mục môn đã thi' : 'Delete all completed exams'}
+          >
+            <Trash2 className="w-4 h-4 shrink-0" />
+            <span>{lang === 'vi' ? 'Xóa' : 'Delete'}</span>
+          </button>
         </div>
       </div>
 
-      {/* VIEW 1: ACCORDION / GROUPED TABLE BY SUBJECT */}
-      {viewMode === 'table' ? (
-        <div className="space-y-3">
-          {/* Quick Sub-header Controls */}
-          {groupedExams.subjects.length > 0 && (
-            <div className="flex items-center justify-between px-1 text-xs text-gray-500 dark:text-gray-400">
-              <div className="flex items-center gap-2">
-                <span>
-                  {lang === 'vi'
-                    ? `Tổng cộng ${groupedExams.subjects.length} môn • ${exams.length} bài thi`
-                    : `Total ${groupedExams.subjects.length} subjects • ${exams.length} exams`}
-                </span>
-              </div>
-              <button
-                onClick={handleToggleAll}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              >
-                {allCollapsed ? (
-                  <>
-                    <ChevronsUpDown className="w-3.5 h-3.5" />
-                    <span>{t.exams.expandAll}</span>
-                  </>
-                ) : (
-                  <>
-                    <ChevronsDownUp className="w-3.5 h-3.5" />
-                    <span>{t.exams.collapseAll}</span>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
+      {/* Filter Tabs: Sắp thi / Đã thi */}
+      {exams.length > 0 && (
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center p-1 bg-gray-100 dark:bg-gray-800/80 rounded-xl border border-gray-200 dark:border-gray-700/60 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setStatusFilter("upcoming")}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                statusFilter === "upcoming"
+                  ? "bg-white dark:bg-gray-900 text-rose-600 dark:text-rose-400 shadow-xs font-bold"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              {lang === "vi"
+                ? (upcomingExams.length > 0 ? `Sắp thi (${upcomingExams.length})` : "Sắp thi")
+                : (upcomingExams.length > 0 ? `Upcoming (${upcomingExams.length})` : "Upcoming")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("passed")}
+              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                statusFilter === "passed"
+                  ? "bg-white dark:bg-gray-900 text-rose-600 dark:text-rose-400 shadow-xs font-bold"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              {lang === "vi" ? `Đã thi (${passedExams.length})` : `Passed (${passedExams.length})`}
+            </button>
+          </div>
+        </div>
+      )}
 
-          {groupedExams.subjects.length === 0 ? (
-            <div className="bg-white dark:bg-gray-900 rounded-2xl p-8 text-center border border-gray-200 dark:border-gray-800 shadow-xs">
-              <NotebookPen className="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
-              <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                {lang === 'vi' ? 'Chưa có lịch thi nào được tạo' : 'No exam schedule created yet'}
-              </p>
-              <button
-                onClick={() => handleOpenAdd()}
-                className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700 shadow-xs"
-              >
-                <Plus className="w-4 h-4" />
-                <span>{t.exams.addExam}</span>
-              </button>
-            </div>
-          ) : (
-            groupedExams.subjects.map((subject) => {
-              const subjectExams = groupedExams.map[subject] || [];
-              const isCollapsed = !!collapsedSubjects[subject];
-
-              return (
-                <div
-                  key={subject}
-                  className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs overflow-hidden transition-all"
-                >
-                  {/* Subject Accordion Header */}
-                  <div
-                    onClick={() => toggleSubject(subject)}
-                    className="w-full flex items-center justify-between gap-3 p-3.5 sm:p-4 bg-gray-50/75 dark:bg-gray-800/40 hover:bg-gray-100/70 dark:hover:bg-gray-800/70 cursor-pointer select-none transition-colors border-b border-gray-100 dark:border-gray-800/60"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-6 h-6 rounded-md bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
-                        {isCollapsed ? (
-                          <ChevronRight className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
-                      </div>
-                      <span className="font-bold text-sm sm:text-base text-gray-900 dark:text-white truncate">
-                        {subject}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200/60 dark:border-rose-800/50">
-                        {subjectExams.length} {lang === 'vi' ? 'bài thi' : 'exams'}
-                      </span>
-                    </div>
-
-                    {/* Right Actions on Subject Header - Chỉ để biểu tượng Sửa và Xóa cho gọn */}
-                    <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-                      {subjectExams.length === 1 ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenEdit(subjectExams[0]);
-                            }}
-                            className="p-1.5 rounded-lg text-indigo-600 dark:text-indigo-400 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors shadow-2xs active:scale-[0.95]"
-                            title={t.common.edit}
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDelete(subjectExams[0].id);
-                            }}
-                            className="p-1.5 rounded-lg text-rose-600 dark:text-rose-400 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:border-rose-300 dark:hover:border-rose-700 transition-colors shadow-2xs active:scale-[0.95]"
-                            title={t.common.delete}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </>
-                      ) : (
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenSubjectMenu(openSubjectMenu === subject ? null : subject);
-                            }}
-                            className="inline-flex items-center gap-1 p-1.5 rounded-lg bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 border border-gray-200 dark:border-gray-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors shadow-2xs active:scale-[0.95]"
-                            title={lang === 'vi' ? 'Sửa hoặc xóa bài thi' : 'Edit or delete exam'}
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                            <ChevronDown className="w-3 h-3 text-gray-400" />
-                          </button>
-
-                          {openSubjectMenu === subject && (
-                            <div
-                              onClick={(e) => e.stopPropagation()}
-                              className="absolute right-0 top-full mt-1.5 z-40 w-72 bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-800 p-2 space-y-1 animate-in fade-in zoom-in-95 duration-100"
-                            >
-                              <div className="text-[11px] font-bold text-gray-500 dark:text-gray-400 px-2 py-1 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
-                                <span>{lang === 'vi' ? 'Chọn bài thi cần thao tác:' : 'Select exam:'}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => setOpenSubjectMenu(null)}
-                                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-0.5"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </div>
-                              {subjectExams.map((ex) => (
-                                <div
-                                  key={ex.id}
-                                  className="flex items-center justify-between gap-2 p-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors"
-                                >
-                                  <div className="min-w-0 pr-1 text-left">
-                                    <div className="text-xs font-bold text-gray-800 dark:text-gray-200 truncate">
-                                      {ex.examName}
-                                    </div>
-                                    <div className="text-[10px] text-gray-500 dark:text-gray-400">
-                                      {formatDateVN(ex.examDate)} - {ex.timeStart}
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenSubjectMenu(null);
-                                        handleOpenEdit(ex);
-                                      }}
-                                      className="p-1 text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950/60 rounded"
-                                      title={t.common.edit}
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenSubjectMenu(null);
-                                        handleDelete(ex.id);
-                                      }}
-                                      className="p-1 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/60 rounded"
-                                      title={t.common.delete}
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Accordion Content: Table of Exams for this Subject */}
-                  {!isCollapsed && (
-                    <div>
-                      {/* Mobile View: Cards for each exam with Sửa / Xóa at top */}
-                      <div className="block sm:hidden divide-y divide-gray-100 dark:divide-gray-800/60">
-                        {subjectExams.map((item) => {
-                          const daysLeft = getDaysRemaining(item.examDate, item.timeStart);
-                          const badgeConfig = formatBadges[item.format];
-
-                          return (
-                            <div key={item.id} className="p-3.5 space-y-2.5 bg-white dark:bg-gray-900">
-                              {/* Top Bar of Mobile Exam: Name + Actions right at top */}
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0">
-                                  <div className="font-bold text-gray-900 dark:text-white text-xs leading-snug">
-                                    {item.examName}
-                                  </div>
-                                  <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                                    <span
-                                      className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold border ${badgeConfig.bg} ${badgeConfig.text} ${badgeConfig.border}`}
-                                    >
-                                      {formatLabels[item.format]}
-                                    </span>
-                                    <span
-                                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold text-[10px] ${
-                                        daysLeft === 0
-                                          ? 'bg-rose-600 text-white animate-pulse'
-                                          : daysLeft > 0 && daysLeft <= 3
-                                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
-                                          : daysLeft > 3
-                                          ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
-                                          : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                                      }`}
-                                    >
-                                      <Timer className="w-3 h-3" />
-                                      {daysLeft === 0
-                                        ? t.exams.today
-                                        : daysLeft > 0
-                                        ? `${lang === 'vi' ? 'Còn' : ''} ${daysLeft} ${lang === 'vi' ? 'ngày' : 'days left'}`
-                                        : t.exams.passed}
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {/* Actions right on top */}
-                                <div className="flex items-center gap-1 shrink-0 bg-gray-50 dark:bg-gray-800 p-1 rounded-lg border border-gray-100 dark:border-gray-700/60">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      handleOpenEdit(item);
-                                    }}
-                                    className="p-1.5 text-indigo-600 dark:text-indigo-400 hover:bg-white dark:hover:bg-gray-700 rounded transition-colors"
-                                    title={t.common.edit}
-                                  >
-                                    <Edit2 className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDelete(item.id)}
-                                    className="p-1.5 text-rose-600 dark:text-rose-400 hover:bg-white dark:hover:bg-gray-700 rounded transition-colors"
-                                    title={t.common.delete}
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </div>
-
-                              {/* Mobile Exam Info */}
-                              <div className="grid grid-cols-2 gap-2 text-xs text-gray-600 dark:text-gray-300 pt-1">
-                                <div className="flex items-center gap-1.5">
-                                  <Calendar className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                                  <span className="truncate">{formatDateVN(item.examDate)} - {item.timeStart}</span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                  <MapPin className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                                  <span className="truncate">{item.room}</span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                  <IdCard className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                                  <span className="font-mono text-[11px] truncate">{item.candidateNumber}</span>
-                                </div>
-                              </div>
-
-                              {item.reviewTopics && (
-                                <div
-                                  onClick={() => setReviewPopupItem(item)}
-                                  className="text-xs bg-gray-50 dark:bg-gray-800/60 p-2 rounded-lg border border-gray-100 dark:border-gray-800 cursor-pointer hover:border-indigo-200 transition-colors"
-                                >
-                                  <span className="font-semibold text-gray-700 dark:text-gray-300 mr-1">
-                                    {t.exams.reviewTopics}:
-                                  </span>
-                                  <span className="text-gray-600 dark:text-gray-400 line-clamp-1">
-                                    {item.reviewTopics}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Tablet/Desktop Table View */}
-                      <div className="hidden sm:block overflow-x-auto">
-                        <table className="w-full text-left text-xs text-gray-600 dark:text-gray-300 min-w-[760px]">
-                        <thead>
-                          <tr className="bg-gray-50/50 dark:bg-gray-800/20 text-gray-500 dark:text-gray-400 uppercase text-[10px] tracking-wider font-bold border-b border-gray-200/80 dark:border-gray-800">
-                            <th className="py-2.5 px-3.5 sm:px-4 w-[26%]">
-                              {t.exams.tableHeaders.testNameFormat}
-                            </th>
-                            <th className="py-2.5 px-3 w-[24%]">
-                              {t.exams.tableHeaders.timeCountdown}
-                            </th>
-                            <th className="py-2.5 px-3 w-[20%]">
-                              {t.exams.tableHeaders.locationSbd}
-                            </th>
-                            <th className="py-2.5 px-3 w-[10%] text-center">
-                              {t.exams.tableHeaders.target}
-                            </th>
-                            <th className="py-2.5 px-3.5 sm:px-4 w-[20%]">
-                              {t.exams.tableHeaders.reviewFocus}
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60">
-                          {subjectExams.map((item) => {
-                            const daysLeft = getDaysRemaining(item.examDate, item.timeStart);
-                            const badgeConfig = formatBadges[item.format];
-
-                            return (
-                              <tr
-                                key={item.id}
-                                className="hover:bg-gray-50/75 dark:hover:bg-gray-800/30 transition-colors group"
-                              >
-                                {/* Cột 1: Tên bài kiểm tra / Hình thức */}
-                                <td className="py-3 px-3.5 sm:px-4">
-                                  <div className="font-semibold text-gray-900 dark:text-white text-xs sm:text-[13px] leading-snug">
-                                    {item.examName}
-                                  </div>
-                                  <div className="mt-1">
-                                    <span
-                                      className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold border ${badgeConfig.bg} ${badgeConfig.text} ${badgeConfig.border}`}
-                                    >
-                                      {formatLabels[item.format]}
-                                    </span>
-                                  </div>
-                                </td>
-
-                                {/* Cột 2: Thời gian & Đếm ngược */}
-                                <td className="py-3 px-3">
-                                  <div className="font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-                                    <Calendar className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                                    <span>
-                                      {formatDateVN(item.examDate)} - {item.timeStart}
-                                    </span>
-                                  </div>
-                                  <div className="mt-1 flex items-center gap-2 flex-wrap text-[11px]">
-                                    <span className="text-gray-500 dark:text-gray-400">
-                                      {item.durationMinutes} {lang === 'vi' ? 'phút' : 'mins'}
-                                    </span>
-                                    <span className="text-gray-300 dark:text-gray-600">•</span>
-                                    <span
-                                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold text-[10px] ${
-                                        daysLeft === 0
-                                          ? 'bg-rose-600 text-white animate-pulse'
-                                          : daysLeft > 0 && daysLeft <= 3
-                                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
-                                          : daysLeft > 3
-                                          ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
-                                          : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                                      }`}
-                                    >
-                                      <Timer className="w-3 h-3" />
-                                      {daysLeft === 0
-                                        ? t.exams.today
-                                        : daysLeft > 0
-                                        ? `${lang === 'vi' ? 'Còn' : ''} ${daysLeft} ${lang === 'vi' ? 'ngày' : 'days left'}`
-                                        : t.exams.passed}
-                                    </span>
-                                  </div>
-                                </td>
-
-                                {/* Cột 3: Địa điểm & SBD */}
-                                <td className="py-3 px-3">
-                                  <div className="flex items-center gap-1 text-gray-800 dark:text-gray-200 truncate font-medium">
-                                    <MapPin className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                                    <span className="truncate">{item.room}</span>
-                                  </div>
-                                  <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
-                                    <IdCard className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                                    <span className="font-mono bg-gray-100 dark:bg-gray-800 px-1.5 py-0.2 rounded font-medium">
-                                      {item.candidateNumber}
-                                    </span>
-                                  </div>
-                                </td>
-
-                                {/* Cột 4: Mục tiêu */}
-                                <td className="py-3 px-3 text-center">
-                                  {item.targetScore !== undefined ? (
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 font-bold text-xs border border-emerald-200/60 dark:border-emerald-800/50">
-                                      <Target className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                                      {item.targetScore}đ
-                                    </span>
-                                  ) : (
-                                    <span className="text-gray-400 dark:text-gray-600">—</span>
-                                  )}
-                                </td>
-
-                                {/* Cột 5: Trọng tâm ôn tập */}
-                                <td className="py-3 px-3 relative">
-                                  {item.reviewTopics ? (
-                                    <div
-                                      className="relative group/topic cursor-pointer"
-                                      onMouseEnter={() => setHoveredTopicId(item.id)}
-                                      onMouseLeave={() => setHoveredTopicId(null)}
-                                      onClick={() => setReviewPopupItem(item)}
-                                    >
-                                      <div className="flex items-center gap-1">
-                                        <span className="truncate max-w-[130px] lg:max-w-[180px] text-gray-700 dark:text-gray-300">
-                                          {item.reviewTopics}
-                                        </span>
-                                        <span
-                                          className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 font-bold text-xs underline decoration-dotted shrink-0"
-                                          title={lang === 'vi' ? 'Bấm để xem đầy đủ trọng tâm ôn tập' : 'Click to view full topics'}
-                                        >
-                                          ...
-                                        </span>
-                                      </div>
-
-                                      {/* Desktop Hover Tooltip */}
-                                      {hoveredTopicId === item.id && (
-                                        <div className="absolute bottom-full left-0 mb-2 z-40 w-64 p-3 bg-gray-900 text-white dark:bg-gray-800 dark:text-gray-100 rounded-xl shadow-xl border border-gray-700 text-xs pointer-events-none transition-all">
-                                          <div className="font-semibold text-rose-300 flex items-center gap-1 mb-1">
-                                            <BookOpen className="w-3.5 h-3.5" />
-                                            <span>{t.exams.reviewTopics}:</span>
-                                          </div>
-                                          <p className="leading-relaxed whitespace-pre-wrap font-normal">
-                                            {item.reviewTopics}
-                                          </p>
-                                          <div className="absolute top-full left-5 -mt-1 border-4 border-transparent border-t-gray-900 dark:border-t-gray-800" />
-                                        </div>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <span className="text-gray-400 dark:text-gray-600">—</span>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-                </div>
-              );
-            })
-          )}
+      {/* Main Content: Card-based view */}
+      {exams.length === 0 ? (
+        <div className="bg-white dark:bg-gray-900 rounded-2xl p-8 text-center border border-gray-200 dark:border-gray-800 shadow-xs">
+          <ScrollText className="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+          <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+            {lang === "vi" ? "Chưa có lịch thi nào được tạo" : "No exam schedule created yet"}
+          </p>
+          <button
+            onClick={() => handleOpenAdd()}
+            className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 shadow-xs cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>{t.exams.addExam}</span>
+          </button>
         </div>
       ) : (
-        /* VIEW 2: CARDS GRID (DANH SÁCH THẺ GỐC) */
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {sortedExams.map((item) => {
-            const daysLeft = getDaysRemaining(item.examDate, item.timeStart);
-            return (
-              <div
-                key={item.id}
-                className="bg-white dark:bg-gray-900 rounded-2xl p-5 border border-gray-200 dark:border-gray-800 hover:border-rose-300 dark:hover:border-rose-900 transition-all shadow-xs flex flex-col justify-between relative overflow-hidden"
-              >
-                {/* Countdown Top Ribbon */}
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-extrabold text-gray-900 dark:text-white">
-                      {item.subject}
-                    </span>
-                    <span className="text-xs px-2.5 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 font-medium">
-                      {item.examName}
-                    </span>
-                  </div>
-
-                  {/* Countdown Badge */}
-                  <div
-                    className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-xl shrink-0 ${
-                      daysLeft === 0
-                        ? 'bg-rose-600 text-white animate-pulse'
-                        : daysLeft > 0 && daysLeft <= 3
-                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
-                        : daysLeft > 3
-                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
-                        : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                    }`}
-                  >
-                    <Timer className="w-3.5 h-3.5" />
-                    <span>
-                      {daysLeft === 0
-                        ? t.exams.today
-                        : daysLeft > 0
-                        ? `${daysLeft} ${lang === 'vi' ? 'ngày nữa' : 'days left'}`
-                        : t.exams.passed}
-                    </span>
-                  </div>
+        <div className="space-y-4">
+          {/* Section 1: Upcoming Exams (Lịch thi sắp tới) */}
+          {statusFilter === "upcoming" && (
+            <div className="space-y-3">
+              {upcomingExams.length === 0 ? (
+                <div className="p-6 rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 text-center text-xs text-gray-400 dark:text-gray-500 bg-gray-50/50 dark:bg-gray-850/30">
+                  {lang === "vi" ? "Hiện tại không có môn thi nào sắp tới." : "No upcoming exams."}
                 </div>
-
-                {/* Exam Info */}
-                <div className="space-y-2 text-xs text-gray-600 dark:text-gray-300">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <span className="flex items-center gap-1 font-semibold text-gray-800 dark:text-gray-200">
-                      <Calendar className="w-3.5 h-3.5 text-rose-500" />
-                      {formatDateVN(item.examDate)}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-blue-500" />
-                      {item.timeStart} ({item.durationMinutes} phút)
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <MapPin className="w-3.5 h-3.5 text-emerald-500" />
-                      {item.room}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-3 flex-wrap pt-1">
-                    <span className="flex items-center gap-1">
-                      <IdCard className="w-3.5 h-3.5 text-indigo-500" />
-                      <span className="font-mono font-medium">{item.candidateNumber}</span>
-                    </span>
-                    <span className="px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 font-semibold text-[11px]">
-                      {formatLabels[item.format]}
-                    </span>
-                  </div>
-
-                  {item.reviewTopics && (
-                    <div className="mt-2 text-xs bg-gray-50 dark:bg-gray-800/60 p-2.5 rounded-xl border border-gray-100 dark:border-gray-800">
-                      <div className="font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1 mb-1">
-                        <BookOpen className="w-3 h-3 text-blue-500" />
-                        <span>{t.exams.reviewTopics}:</span>
-                      </div>
-                      <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
-                        {item.reviewTopics}
-                      </p>
-                    </div>
-                  )}
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
+                  {upcomingExams.map(renderExamCard)}
                 </div>
+              )}
+            </div>
+          )}
 
-                {/* Bottom Actions */}
-                <div className="flex items-center justify-end pt-4 mt-4 border-t border-gray-100 dark:border-gray-800">
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => {
-                        handleOpenEdit(item);
-                      }}
-                      className="p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                      title={t.common.edit}
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(item.id)}
-                      className="p-1.5 text-gray-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                      title={t.common.delete}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+          {/* Section 2: Passed Exams (Danh mục môn đã thi) */}
+          {statusFilter === "passed" && (
+            <div className="space-y-3">
+              {passedExams.length === 0 ? (
+                <div className="p-6 rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 text-center text-xs text-gray-400 dark:text-gray-500 bg-gray-50/50 dark:bg-gray-850/30">
+                  {lang === "vi" ? "Chưa có môn thi nào đã hoàn thành." : "No completed exams yet."}
                 </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
+                  {passedExams.map(renderExamCard)}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Confirm Delete Single Exam Modal */}
+      {itemToDelete && (
+        <div
+          data-app-modal="true"
+          {...modalTouchHandlers}
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setItemToDelete(null)}
+        >
+          <div
+            className="w-full max-w-sm bg-white dark:bg-gray-900 rounded-2xl p-5 shadow-2xl border border-gray-200 dark:border-gray-800 space-y-4 animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
               </div>
-            );
-          })}
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-gray-900 dark:text-white leading-tight">
+                  {lang === 'vi' ? 'Xác nhận xóa lịch thi' : 'Confirm Delete Exam'}
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {lang === 'vi' ? 'Hành động này không thể hoàn tác' : 'This action cannot be undone'}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-100 dark:border-gray-800 text-xs space-y-1">
+              <div className="font-bold text-gray-900 dark:text-white">
+                {itemToDelete.subject} - {itemToDelete.examName}
+              </div>
+              <div className="text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                <span>{formatDateVN(itemToDelete.examDate)}</span>
+                <span>•</span>
+                <span>{itemToDelete.timeStart} ({itemToDelete.durationMinutes} phút)</span>
+              </div>
+              {itemToDelete.room && (
+                <div className="text-gray-500 dark:text-gray-400">
+                  {lang === 'vi' ? 'Phòng thi' : 'Room'}: {itemToDelete.room}
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs text-gray-600 dark:text-gray-300">
+              {lang === 'vi'
+                ? 'Bạn có chắc chắn muốn xóa bài thi này khỏi lịch thi không?'
+                : 'Are you sure you want to delete this exam schedule?'}
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setItemToDelete(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+              >
+                {t.common.cancel}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 transition-colors shadow-sm shadow-rose-600/20 cursor-pointer"
+              >
+                {lang === 'vi' ? 'Xác nhận xóa' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Delete All Passed Exams Modal */}
+      {isDeleteAllPassedOpen && (
+        <div
+          data-app-modal="true"
+          {...modalTouchHandlers}
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setIsDeleteAllPassedOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-white dark:bg-gray-900 rounded-2xl p-5 shadow-2xl border border-gray-200 dark:border-gray-800 space-y-4 animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-gray-900 dark:text-white leading-tight">
+                  {lang === 'vi' ? 'Xác nhận xóa môn đã thi' : 'Confirm Delete Completed Exams'}
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {lang === 'vi' ? 'Hành động này không thể hoàn tác' : 'This action cannot be undone'}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 rounded-xl border border-rose-100 dark:border-rose-900/50 text-xs text-rose-800 dark:text-rose-300">
+              {lang === 'vi'
+                ? `Hệ thống sẽ xóa toàn bộ ${passedExams.length} môn thi trong danh mục "Đã thi".`
+                : `This will remove all ${passedExams.length} exams in the "Passed" category.`}
+            </div>
+
+            <p className="text-xs text-gray-600 dark:text-gray-300">
+              {lang === 'vi'
+                ? 'Bạn có chắc chắn muốn tiếp tục thực hiện xóa không?'
+                : 'Are you sure you want to proceed with deleting all completed exams?'}
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setIsDeleteAllPassedOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+              >
+                {t.common.cancel}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteAllPassed}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 transition-colors shadow-sm shadow-rose-600/20 cursor-pointer"
+              >
+                {lang === 'vi' ? `Xóa tất cả (${passedExams.length})` : `Delete all (${passedExams.length})`}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -972,84 +866,19 @@ export const ExamScheduleView: React.FC<ExamScheduleViewProps> = ({
                 {/* 2-Column Responsive Form Layout */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
                   {/* HÀNG 1: MÔN HỌC (DROPDOWN TÌM KIẾM / CHỌN) */}
-                  <div className="relative">
+                  <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1 flex items-center justify-between">
                       <span>{t.periods.subject} <span className="text-red-500">*</span></span>
-                      <span className="text-[10px] text-blue-600 dark:text-blue-400 font-normal">Gõ tìm hoặc chọn</span>
+                      <span className="text-[10px] text-rose-600 dark:text-rose-400 font-normal">Chọn từ danh mục</span>
                     </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        required
-                        value={editingItem.subject}
-                        onFocus={() => {
-                          setSubjectQuery(editingItem.subject || '');
-                          setIsSubjectDropdownOpen(true);
-                        }}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setSubjectQuery(val);
-                          setEditingItem({ ...editingItem, subject: val });
-                          setIsSubjectDropdownOpen(true);
-                        }}
-                        placeholder={t.exams.selectSubjectPlaceholder || 'Toán học, Tiếng Anh...'}
-                        className="w-full pl-3 pr-9 py-2.5 text-xs sm:text-[13px] rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 outline-none focus:ring-2 focus:ring-rose-500 transition-colors"
-                      />
-                      <button
-                        type="button"
-                        tabIndex={-1}
-                        onClick={() => setIsSubjectDropdownOpen(!isSubjectDropdownOpen)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
-                      >
-                        <ChevronDown className={`w-4 h-4 transition-transform duration-150 ${isSubjectDropdownOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                    </div>
-
-                    {/* Autocomplete / Select Dropdown */}
-                    {isSubjectDropdownOpen && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-30"
-                          onClick={() => setIsSubjectDropdownOpen(false)}
-                        />
-                        <div className="absolute left-0 right-0 top-full mt-1.5 z-40 bg-white dark:bg-gray-850 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xl max-h-52 overflow-y-auto py-1 animate-in fade-in zoom-in-95 duration-100">
-                          {matchingSubjects.map((sub) => (
-                            <button
-                              key={sub}
-                              type="button"
-                              onClick={() => {
-                                setEditingItem({ ...editingItem, subject: sub });
-                                setSubjectQuery(sub);
-                                setIsSubjectDropdownOpen(false);
-                              }}
-                              className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer ${
-                                editingItem.subject === sub
-                                  ? 'bg-rose-50/70 dark:bg-rose-950/60 font-bold text-rose-700 dark:text-rose-300'
-                                  : 'text-gray-700 dark:text-gray-300'
-                              }`}
-                            >
-                              <span>{sub}</span>
-                              {editingItem.subject === sub && <Check className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />}
-                            </button>
-                          ))}
-
-                          {/* Quick Option to Add Custom Subject */}
-                          {subjectQuery.trim() && !availableSubjects.some((s) => s.toLowerCase() === subjectQuery.trim().toLowerCase()) && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingItem({ ...editingItem, subject: subjectQuery.trim() });
-                                setIsSubjectDropdownOpen(false);
-                              }}
-                              className="w-full text-left px-3 py-2 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border-t border-gray-100 dark:border-gray-800 flex items-center gap-1.5 cursor-pointer"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                              <span>{t.exams.addNewSubject || 'Thêm môn'}: "{subjectQuery.trim()}"</span>
-                            </button>
-                          )}
-                        </div>
-                      </>
-                    )}
+                    <SubjectCombobox
+                      required
+                      value={editingItem.subject}
+                      subjects={subjects}
+                      onChange={(name) => setEditingItem({ ...editingItem, subject: name })}
+                      placeholder={t.exams.selectSubjectPlaceholder || 'Toán học, Tiếng Anh...'}
+                      className="w-full pl-3 pr-9 py-2.5 text-xs sm:text-[13px] rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 outline-none focus:ring-2 focus:ring-rose-500 transition-colors"
+                    />
                   </div>
 
                   {/* HÀNG 1: TÊN ĐỢT THI / KỲ THI */}
@@ -1193,9 +1022,59 @@ export const ExamScheduleView: React.FC<ExamScheduleViewProps> = ({
                       <option value="practice">{t.exams.formats.practice}</option>
                     </select>
                   </div>
+
+                  {/* HÀNG 5: ĐIỂM MỤC TIÊU */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1 flex items-center justify-between">
+                      <span>{lang === 'vi' ? 'Điểm mục tiêu (Thang 10)' : 'Target Score (0 - 10)'}</span>
+                      <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                        {lang === 'vi' ? 'Để trống nếu không đặt' : 'Leave blank to skip'}
+                      </span>
+                    </label>
+                    <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                      <div className="relative w-32 shrink-0">
+                        <input
+                          type="number"
+                          min={0}
+                          max={10}
+                          step={0.1}
+                          value={editingItem.targetScore ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEditingItem({
+                              ...editingItem,
+                              targetScore:
+                                val === '' ? undefined : Math.min(10, Math.max(0, Number(val))),
+                            });
+                          }}
+                          placeholder="8.8"
+                          className="w-full px-3 py-2 text-xs sm:text-[13px] font-bold rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 outline-none focus:ring-2 focus:ring-rose-500"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
+                          đ
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {[7.5, 8.0, 8.5, 9.0, 9.5, 10].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setEditingItem({ ...editingItem, targetScore: preset })}
+                            className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                              editingItem.targetScore === preset
+                                ? 'bg-emerald-600 text-white shadow-2xs'
+                                : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-emerald-50 hover:text-emerald-800 dark:hover:bg-emerald-950/40'
+                            }`}
+                          >
+                            {preset}đ
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                {/* HÀNG 5: TRỌNG TÂM ÔN TẬP */}
+                {/* HÀNG 6: TRỌNG TÂM ÔN TẬP */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
                     {t.exams.reviewTopics}
@@ -1226,6 +1105,118 @@ export const ExamScheduleView: React.FC<ExamScheduleViewProps> = ({
                   <Save className="w-4 h-4" />
                   <span>{lang === 'vi' ? 'Lưu' : 'Save'}</span>
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Target Score Edit Modal */}
+      {targetEditItem && (
+        <div
+          data-app-modal="true"
+          {...modalTouchHandlers}
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setTargetEditItem(null)}
+        >
+          <div
+            className="w-full max-w-sm bg-white dark:bg-gray-900 rounded-2xl p-5 shadow-2xl border border-gray-200 dark:border-gray-800 space-y-4 animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <Target className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-bold text-gray-950 dark:text-white leading-tight truncate">
+                    {lang === 'vi' ? 'Chỉnh sửa điểm mục tiêu' : 'Edit Target Score'}
+                  </h3>
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 truncate">
+                    {targetEditItem.subject} • {targetEditItem.examName}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTargetEditItem(null)}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 shrink-0 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveTargetEdit} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-gray-800 dark:text-gray-200 mb-1.5">
+                  {lang === 'vi' ? 'Điểm mục tiêu (0 - 10)' : 'Target score (0 - 10)'}
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={0}
+                    max={10}
+                    step={0.1}
+                    autoFocus
+                    value={targetScoreInput}
+                    onChange={(e) => setTargetScoreInput(e.target.value)}
+                    placeholder="8.8"
+                    className="w-full px-3.5 py-2.5 text-sm font-bold rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-950 dark:text-white placeholder:text-gray-400 outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-500 pointer-events-none">
+                    điểm
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-semibold text-gray-600 dark:text-gray-400 mr-0.5">
+                  {lang === 'vi' ? 'Chọn nhanh:' : 'Quick:'}
+                </span>
+                {[7.5, 8.0, 8.5, 9.0, 9.5, 10].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setTargetScoreInput(String(preset))}
+                    className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                      Number(targetScoreInput) === preset && targetScoreInput !== ''
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 hover:bg-emerald-50 hover:text-emerald-800 dark:hover:bg-emerald-950/40'
+                    }`}
+                  >
+                    {preset}đ
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-1">
+                {targetScoreInput !== '' ? (
+                  <button
+                    type="button"
+                    onClick={() => setTargetScoreInput('')}
+                    className="text-xs font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400 cursor-pointer"
+                  >
+                    {lang === 'vi' ? 'Xóa mục tiêu' : 'Clear target'}
+                  </button>
+                ) : (
+                  <span />
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTargetEditItem(null)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                  >
+                    {t.common.cancel}
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors shadow-sm shadow-emerald-600/20 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{lang === 'vi' ? 'Lưu' : 'Save'}</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>

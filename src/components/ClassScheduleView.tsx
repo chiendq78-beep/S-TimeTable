@@ -18,56 +18,76 @@ import {
   X,
   FileDown,
   Loader2,
+  School,
+  Settings2,
+  CheckCircle2,
+  ChevronDown,
+  Layers,
+  ArrowRight,
+  Info,
+  BookOpen,
+  Share2,
+  Image as ImageIcon,
+  AlertCircle,
 } from 'lucide-react';
-import html2canvas from 'html2canvas-pro';
-import jsPDF from 'jspdf';
+import {
+  exportElementToPdf,
+  shareGeneratedPdf,
+  shareOrDownloadPng,
+  cleanupGeneratedPdf,
+  triggerAnchorDownload,
+  GeneratedPdfResult,
+} from '../utils/pdfExport';
 import { StorageService } from '../services/storage';
-import { ClassScheduleItem, Language } from '../types';
+import { ClassScheduleItem, ClassTimetable, Language, SubjectItem } from '../types';
 import { translations } from '../i18n/translations';
 import { useSwipeToCloseModal } from '../hooks/useSwipeToCloseModal';
+import { SubjectCombobox } from './SubjectCombobox';
 
 interface ClassScheduleViewProps {
-  schedule: ClassScheduleItem[];
-  onSaveSchedule: (items: ClassScheduleItem[]) => void;
+  schedule?: ClassScheduleItem[];
+  onSaveSchedule?: (items: ClassScheduleItem[]) => void;
   lang: Language;
+  onShowToast?: (msg: string) => void;
+  subjects?: SubjectItem[];
 }
 
-// Gentle pastel palette variants for periods
+// Soft light green (xanh nhạt) palette variants for period cards
 const pastelPeriodVariants = [
   {
-    bg: 'bg-[#faf6f0] dark:bg-[#251e18]/80',
-    border: 'border-[#ebdcd0] dark:border-[#3f3024]',
-    badgeBg: 'bg-[#ebdcd0] dark:bg-[#3a2c20]',
-    badgeText: 'text-[#5b3823] dark:text-[#f8ede3]',
-    badgeLabel: 'text-[#8b6852] dark:text-[#c4ae9d]',
+    bg: 'bg-[#f0f7f4] dark:bg-[#15231c]/85',
+    border: 'border-[#d4e9df] dark:border-[#223b2e]',
+    badgeBg: 'bg-[#dcf0e4] dark:bg-[#1e3c2c]',
+    badgeText: 'text-[#1e4d34] dark:text-[#c4efd6]',
+    badgeLabel: 'text-[#3b7955] dark:text-[#8eccaa]',
   },
   {
-    bg: 'bg-[#f3f7f4] dark:bg-[#1a241e]/80',
-    border: 'border-[#dbe6dc] dark:border-[#2a3a2e]',
-    badgeBg: 'bg-[#dce9de] dark:bg-[#253629]',
-    badgeText: 'text-[#2c5339] dark:text-[#d1ecd7]',
-    badgeLabel: 'text-[#4d755a] dark:text-[#9fc7ab]',
+    bg: 'bg-[#f0f7f6] dark:bg-[#142321]/85',
+    border: 'border-[#d2eae4] dark:border-[#203a35]',
+    badgeBg: 'bg-[#daf0eb] dark:bg-[#1c3d36]',
+    badgeText: 'text-[#1a4c44] dark:text-[#c2ece4]',
+    badgeLabel: 'text-[#36786c] dark:text-[#8ac6bc]',
   },
   {
-    bg: 'bg-[#f2f6fa] dark:bg-[#182129]/80',
-    border: 'border-[#d5e3ed] dark:border-[#273542]',
-    badgeBg: 'bg-[#d8e7f2] dark:bg-[#233240]',
-    badgeText: 'text-[#264c6b] dark:text-[#cbe4f7]',
-    badgeLabel: 'text-[#496f91] dark:text-[#9bc2e3]',
+    bg: 'bg-[#f1f7f2] dark:bg-[#162318]/85',
+    border: 'border-[#d5e9d7] dark:border-[#233a27]',
+    badgeBg: 'bg-[#ddf0df] dark:bg-[#203d25]',
+    badgeText: 'text-[#204d26] dark:text-[#c5eecb]',
+    badgeLabel: 'text-[#3e7945] dark:text-[#8ecb96]',
   },
   {
-    bg: 'bg-[#f7f4fa] dark:bg-[#221c29]/80',
-    border: 'border-[#e6deef] dark:border-[#342742]',
-    badgeBg: 'bg-[#eadff5] dark:bg-[#2f223f]',
-    badgeText: 'text-[#4f316b] dark:text-[#e4d1f7]',
-    badgeLabel: 'text-[#745094] dark:text-[#c09de5]',
+    bg: 'bg-[#eff7f8] dark:bg-[#142226]/85',
+    border: 'border-[#d0e8ec] dark:border-[#1f373f]',
+    badgeBg: 'bg-[#d8eef3] dark:bg-[#1c3943]',
+    badgeText: 'text-[#194b57] dark:text-[#c0eaf3]',
+    badgeLabel: 'text-[#347685] dark:text-[#88c4d2]',
   },
   {
-    bg: 'bg-[#faf4f2] dark:bg-[#291d1c]/80',
-    border: 'border-[#eedbda] dark:border-[#422928]',
-    badgeBg: 'bg-[#f6dfdc] dark:bg-[#3a2322]',
-    badgeText: 'text-[#6b3531] dark:text-[#f7d3cf]',
-    badgeLabel: 'text-[#93544f] dark:text-[#e5a09b]',
+    bg: 'bg-[#f2f8f3] dark:bg-[#16251b]/85',
+    border: 'border-[#d6ebd9] dark:border-[#233d2a]',
+    badgeBg: 'bg-[#def1e1] dark:bg-[#204028]',
+    badgeText: 'text-[#21502b] dark:text-[#c7f1d0]',
+    badgeLabel: 'text-[#3e7c4a] dark:text-[#8ecc9d]',
   },
 ];
 
@@ -76,13 +96,73 @@ const getPeriodVariant = (period: number) => {
   return pastelPeriodVariants[index];
 };
 
+export const getTodayDayNum = (): number => {
+  const d = new Date().getDay();
+  return d === 0 ? 8 : d + 1;
+};
+
 export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
-  schedule,
-  onSaveSchedule,
+  schedule: initialScheduleProp,
+  onSaveSchedule: onSaveScheduleProp,
   lang,
+  onShowToast,
+  subjects,
 }) => {
   const t = translations[lang];
-  const [selectedDay, setSelectedDay] = useState<number>(2); // Default Monday (2)
+
+  // Multi-Class Timetables Management State
+  const [timetables, setTimetables] = useState<ClassTimetable[]>(() =>
+    StorageService.getClassTimetables()
+  );
+  const [activeClassId, setActiveClassId] = useState<string>(() =>
+    StorageService.getActiveClassId()
+  );
+
+  // Student profile for report header
+  const studentProfile = StorageService.getStudentProfile();
+
+  // Active class resolution
+  const activeClass: ClassTimetable =
+    timetables.find((item) => item.id === activeClassId) ||
+    timetables[0] || {
+      id: 'class-default',
+      className: studentProfile.classGrade || '11 Chuyên Toán (11T1)',
+      grade: 'Khối 11',
+      academicYear: studentProfile.academicYear || '2025 - 2026',
+      room: 'Phòng 302',
+      homeroomTeacher: studentProfile.homeroomTeacher || 'Cô Trần Thị Mai Lan',
+      isDefault: true,
+      schedule: initialScheduleProp || [],
+    };
+
+  // The active schedule items
+  const schedule = activeClass.schedule;
+
+  // Synchronize multi-class list from storage on mount
+  useEffect(() => {
+    const list = StorageService.getClassTimetables();
+    const activeId = StorageService.getActiveClassId();
+    setTimetables(list);
+    setActiveClassId(activeId);
+  }, []);
+
+
+  const [selectedDay, setSelectedDay] = useState<number>(() => getTodayDayNum());
+
+  // Always default to today and scroll to today's pill when entering TK Biểu
+  useEffect(() => {
+    setSelectedDay(getTodayDayNum());
+    const timer = setTimeout(() => {
+      if (selectedPillRef.current) {
+        selectedPillRef.current.scrollIntoView({
+          behavior: 'smooth',
+          inline: 'center',
+          block: 'nearest',
+        });
+      }
+    }, 120);
+    return () => clearTimeout(timer);
+  }, []);
   const [viewMode, setViewMode] = useState<'day' | 'week'>('day');
   const [editingItem, setEditingItem] = useState<ClassScheduleItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -92,72 +172,109 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
   const [copied, setCopied] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [pdfSuccess, setPdfSuccess] = useState(false);
+  const [pdfResult, setPdfResult] = useState<GeneratedPdfResult | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const printScheduleRef = useRef<HTMLDivElement>(null);
 
-  // Student profile for report header
-  const studentProfile = StorageService.getStudentProfile();
+  // Clean up generated PDF blob URLs when closing modal or switching scope/day
+  useEffect(() => {
+    if (!isPrintModalOpen) {
+      setPdfResult((prev) => {
+        cleanupGeneratedPdf(prev);
+        return null;
+      });
+      setPdfError(null);
+      setPdfSuccess(false);
+    }
+  }, [isPrintModalOpen]);
 
-  // Export timetable directly as a high-quality .pdf file
+  useEffect(() => {
+    setPdfResult((prev) => {
+      cleanupGeneratedPdf(prev);
+      return null;
+    });
+    setPdfError(null);
+    setPdfSuccess(false);
+  }, [printScope, selectedDay, activeClassId]);
+
+  // Class Selection Handler
+  const handleSelectClass = (newClassId: string) => {
+    setActiveClassId(newClassId);
+    StorageService.saveActiveClassId(newClassId);
+    const target = timetables.find((t) => t.id === newClassId);
+    if (target && onSaveScheduleProp) {
+      onSaveScheduleProp(target.schedule);
+    }
+  };
+
+  // Schedule Save Handler (Synchronized across multi-class storage)
+  const onSaveSchedule = (newItems: ClassScheduleItem[]) => {
+    const updated = timetables.map((t) =>
+      t.id === activeClass.id ? { ...t, schedule: newItems } : t
+    );
+    setTimetables(updated);
+    StorageService.saveClassTimetables(updated);
+    if (onSaveScheduleProp) {
+      onSaveScheduleProp(newItems);
+    }
+  };
+
+
+
+  // Export timetable directly as a high-quality .pdf file (Mobile + Desktop compatible)
   const handleExportPdf = async () => {
     if (!printScheduleRef.current) return;
     setIsExportingPdf(true);
     setPdfSuccess(false);
+    setPdfError(null);
 
     try {
-      const element = printScheduleRef.current;
-      const isLandscape = printScope === 'week';
-
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-      });
-
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({
-        orientation: isLandscape ? 'landscape' : 'portrait',
-        unit: 'mm',
-        format: 'a4',
-      });
-
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      const imgProps = pdf.getImageProperties(imgData);
-      const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
-
-      if (imgHeight <= pdfHeight) {
-        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, imgHeight);
-      } else {
-        let heightLeft = imgHeight;
-        let position = 0;
-
-        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
-        heightLeft -= pdfHeight;
-
-        while (heightLeft > 0) {
-          position = heightLeft - imgHeight;
-          pdf.addPage();
-          pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
-          heightLeft -= pdfHeight;
-        }
-      }
-
+      const classSlug = (activeClass.className || 'Lop').replace(/[^a-zA-Z0-9]/g, '_');
       const daySuffix = printScope === 'day' ? `Thu_${selectedDay}` : 'Toan_tuan';
-      pdf.save(`Thoi-khoa-bieu-${daySuffix}.pdf`);
+      const filename = `Thoi-khoa-bieu-${classSlug}-${daySuffix}.pdf`;
+      const result = await exportElementToPdf({
+        element: printScheduleRef.current,
+        filename,
+        orientation: printScope === 'week' ? 'landscape' : 'portrait',
+        title:
+          lang === 'vi'
+            ? `Thời khóa biểu ${activeClass.className}`
+            : `Timetable ${activeClass.className}`,
+      });
 
+      setPdfResult((prev) => {
+        cleanupGeneratedPdf(prev);
+        return result;
+      });
       setPdfSuccess(true);
-      setTimeout(() => setPdfSuccess(false), 3000);
+      if (onShowToast) {
+        onShowToast(
+          result.deliveredVia === 'capacitor'
+            ? lang === 'vi'
+              ? 'Đã tạo file PDF! Chọn ứng dụng để lưu hoặc chia sẻ.'
+              : 'PDF ready to share or save!'
+            : lang === 'vi'
+            ? 'Đã tạo file PDF thành công!'
+            : 'PDF generated successfully!'
+        );
+      }
     } catch (err) {
       console.error('Error exporting PDF:', err);
+      setPdfError(
+        lang === 'vi'
+          ? 'Không thể tạo file PDF trên thiết bị này. Vui lòng thử lại hoặc dùng nút Sao chép / Tải .txt.'
+          : 'Could not generate PDF on this device. Please try again.'
+      );
     } finally {
       setIsExportingPdf(false);
     }
   };
 
-  // Swipe-to-close on mobile/tablet for all modals in ClassScheduleView
+  // Swipe-to-close on mobile/tablet for active modals in ClassScheduleView
+  const isAnyModalOpen = isModalOpen || isPrintModalOpen || !!itemToDelete;
+
   const { modalTouchHandlers } = useSwipeToCloseModal({
-    isOpen: isModalOpen || isPrintModalOpen || !!itemToDelete,
+    isOpen: isAnyModalOpen,
     onClose: () => {
       setIsModalOpen(false);
       setIsPrintModalOpen(false);
@@ -233,10 +350,7 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
   };
 
   // Get today's day number (Monday = 2 ... Sunday = 8)
-  const todayDayNum = (() => {
-    const d = new Date().getDay();
-    return d === 0 ? 8 : d + 1;
-  })();
+  const todayDayNum = getTodayDayNum();
 
   const currentDayItems = schedule
     .filter((item) => item.dayOfWeek === selectedDay)
@@ -258,7 +372,7 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
       timeStart: '07:15',
       timeEnd: '08:00',
       subject: '',
-      room: 'Phòng 302',
+      room: activeClass.room || 'Phòng 302',
       teacher: '',
       color: '#3B82F6',
       note: '',
@@ -282,45 +396,82 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
 
   return (
     <div className="space-y-3.5 sm:space-y-4">
-      {/* Top Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-gray-900 p-3.5 sm:p-4 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs">
-        <div>
-          <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-[#5b3823] dark:text-[#d7b89f]" />
-            {t.tabs.timetable}
-          </h2>
-        </div>
-
-        <div className="flex items-center justify-between sm:justify-start gap-2 shrink-0">
-          {/* View Mode Toggle */}
-          <div className="flex items-center bg-[#f7efe7] dark:bg-gray-800 p-0.5 rounded-xl border border-[#e8ded5] dark:border-gray-700 text-xs font-semibold shrink-0">
-            <button
-              onClick={() => setViewMode('day')}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${
-                viewMode === 'day'
-                  ? 'bg-[#b89278] text-white shadow-xs'
-                  : 'text-[#6e503e] hover:text-[#2c1810] dark:text-gray-400'
-              }`}
-            >
-              {lang === 'vi' ? 'Theo Ngày' : 'By Day'}
-            </button>
-            <button
-              onClick={() => setViewMode('week')}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${
-                viewMode === 'week'
-                  ? 'bg-[#b89278] text-white shadow-xs'
-                  : 'text-[#6e503e] hover:text-[#2c1810] dark:text-gray-400'
-              }`}
-            >
-              {lang === 'vi' ? 'Toàn Tuần' : 'Full Week'}
-            </button>
+      {/* Top Header Card */}
+      <div className="flex flex-col gap-3 bg-white dark:bg-gray-900 p-3.5 sm:p-4 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs">
+        {/* Row 1: Title + View Mode (Theo Ngày / Theo Tuần) */}
+        <div className="flex items-center justify-between gap-2.5 flex-wrap">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-[#5b3823] dark:text-[#d7b89f]" />
+              {t.tabs.timetable}
+            </h2>
           </div>
 
-          {/* Add Class Button */}
+          <div className="flex items-center justify-end gap-2 shrink-0">
+            {/* View Mode Toggle */}
+            <div className="flex items-center bg-[#f7efe7] dark:bg-gray-800 p-0.5 rounded-xl border border-[#e8ded5] dark:border-gray-700 text-xs font-semibold shrink-0">
+              <button
+                onClick={() => setViewMode('day')}
+                className={`px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${
+                  viewMode === 'day'
+                    ? 'bg-[#5b3823] text-white shadow-xs'
+                    : 'text-[#6e503e] hover:text-[#2c1810] dark:text-gray-400'
+                }`}
+              >
+                {lang === 'vi' ? 'Theo Ngày' : 'By Day'}
+              </button>
+              <button
+                onClick={() => setViewMode('week')}
+                className={`px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${
+                  viewMode === 'week'
+                    ? 'bg-[#5b3823] text-white shadow-xs'
+                    : 'text-[#6e503e] hover:text-[#2c1810] dark:text-gray-400'
+                }`}
+              >
+                {lang === 'vi' ? 'Theo Tuần' : 'By Week'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Row 2: CLASS QUICK SWITCHER PILLS + Add Class Period Button */}
+        <div className="pt-2.5 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2">
+          {timetables.length > 0 ? (
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 min-w-0 flex-1">
+              <span className="text-xs font-bold text-[#8b6852] dark:text-[#cbab95] flex items-center gap-1 mr-1 shrink-0">
+                <School className="w-3.5 h-3.5 text-[#5b3823] dark:text-[#d7b89f]" />
+                {lang === 'vi' ? 'Lớp:' : 'Class:'}
+              </span>
+
+              {/* Class Quick Selection Pills */}
+              {timetables.map((item) => {
+                const isSelected = item.id === activeClass.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleSelectClass(item.id)}
+                    className={`flex items-center justify-center px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 active:scale-95 ${
+                      isSelected
+                        ? 'bg-[#5b3823] text-white shadow-xs ring-2 ring-[#5b3823]/30'
+                        : 'bg-[#faf6f0] dark:bg-gray-800 text-[#6e503e] dark:text-gray-300 border border-[#ebdcd0] dark:border-gray-700 hover:bg-[#f3ece4] dark:hover:bg-gray-750'
+                    }`}
+                    title={item.className}
+                  >
+                    <span className="truncate max-w-[140px] sm:max-w-[180px]">{item.className}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div />
+          )}
+
+          {/* Add Class Period Button */}
           <button
             id="add-class-period-btn"
             onClick={handleOpenAdd}
-            className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs font-semibold bg-[#b89278] text-white hover:bg-[#a68066] shadow-sm shadow-[#b89278]/20 transition-all active:scale-[0.98] shrink-0 whitespace-nowrap"
+            className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs font-semibold bg-[#5b3823] text-white hover:bg-[#432817] shadow-sm shadow-[#5b3823]/25 transition-all active:scale-[0.98] shrink-0 whitespace-nowrap cursor-pointer ml-auto"
           >
             <Plus className="w-4 h-4" />
             <span>{lang === 'vi' ? 'Thêm' : 'Add'}</span>
@@ -387,7 +538,7 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                 onClick={() => setSelectedDay(day.num)}
                 className={`flex flex-col items-center justify-center min-w-[52px] sm:min-w-[60px] px-3 py-2 rounded-xl font-bold transition-all border shrink-0 relative ${
                   isSelected
-                    ? 'bg-[#b89278] text-white border-[#a88268] shadow-xs scale-[1.02]'
+                    ? 'bg-[#5b3823] text-white border-[#432817] shadow-xs scale-[1.02]'
                     : 'bg-[#fdfaf7] dark:bg-gray-800 text-[#4a3528] dark:text-gray-200 border-[#ebdcd0] dark:border-gray-700 hover:bg-[#f7ede3] hover:border-[#dfc8b7]'
                 }`}
               >
@@ -410,16 +561,16 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
         <div
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
-          className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5"
+          className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-5"
         >
           {/* Morning Session */}
-          <div className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl p-4 sm:p-5 border border-gray-200 dark:border-gray-800 shadow-xs">
-            <div className="flex items-center gap-2 pb-3.5 border-b border-gray-100 dark:border-gray-800 text-amber-600 dark:text-amber-400 font-bold text-sm">
-              <Sun className="w-5 h-5" />
+          <div className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl p-2.5 sm:p-5 border border-gray-200 dark:border-gray-800 shadow-xs">
+            <div className="flex items-center gap-2 pb-3 border-b border-gray-100 dark:border-gray-800 text-blue-600 dark:text-blue-400 font-bold text-sm">
+              <Sun className="w-5 h-5 text-blue-600 dark:text-blue-400" />
               <span>{t.periods.morning}</span>
             </div>
 
-            <div className="space-y-2 sm:space-y-2.5 mt-3">
+            <div className="space-y-2 sm:space-y-2.5 mt-2.5 sm:mt-3">
               {morningItems.length === 0 ? (
                 <div className="py-8 text-center text-xs text-gray-400 dark:text-gray-500">
                   {t.periods.noClass}
@@ -434,43 +585,52 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                         setEditingItem({ ...item });
                         setIsModalOpen(true);
                       }}
-                      className={`p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border ${variant.bg} ${variant.border} shadow-2xs flex items-start justify-between gap-3 group transition-all hover:shadow-xs hover:border-[#b89278]/60 cursor-pointer`}
+                      className="p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl bg-white dark:bg-gray-800/95 border border-gray-200/90 border-b-2 border-b-gray-300/75 dark:border-gray-700/80 dark:border-b-gray-950/90 shadow-[0_3px_10px_-2px_rgba(15,23,42,0.08),0_1px_3px_rgba(15,23,42,0.05)] hover:shadow-[0_6px_16px_-3px_rgba(15,23,42,0.12)] hover:-translate-y-0.5 hover:border-emerald-400/70 dark:hover:border-emerald-600/60 flex items-start justify-between gap-2 group transition-all cursor-pointer overflow-hidden relative"
                       title={lang === 'vi' ? 'Nhấn để chỉnh sửa tiết học này' : 'Click to edit this period'}
                     >
-                      <div className="flex items-start gap-3">
+                      <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
                         <div className={`w-9 h-9 rounded-xl ${variant.badgeBg} ${variant.badgeText} font-extrabold flex flex-col items-center justify-center shrink-0 border border-black/5 dark:border-white/5 shadow-2xs`}>
                           <span className={`text-[9px] uppercase font-bold leading-none ${variant.badgeLabel}`}>Tiết</span>
                           <span className="text-sm leading-none mt-0.5 font-black">{item.period}</span>
                         </div>
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm sm:text-[15px] font-bold text-gray-950 dark:text-white line-clamp-1">
                               {item.subject}
                             </h4>
                           </div>
-                          <div className="flex items-center gap-3 text-xs text-gray-600 dark:text-gray-400 mt-1 flex-wrap">
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5 opacity-70" />
-                              {item.timeStart} - {item.timeEnd}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <MapPin className="w-3.5 h-3.5 opacity-70" />
-                              {item.room}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <UserCheck className="w-3.5 h-3.5 opacity-70" />
-                              {item.teacher}
-                            </span>
+                          <div className="text-xs font-medium text-gray-800 dark:text-gray-200 mt-1 space-y-0.5">
+                            {/* Dòng 1: Thời gian và Phòng học cùng 1 dòng */}
+                            <div className="flex items-center gap-2.5 sm:gap-3 flex-nowrap whitespace-nowrap text-[11px] sm:text-xs font-semibold text-gray-800 dark:text-gray-100">
+                              <span className="flex items-center gap-1 shrink-0">
+                                <Clock className="w-3.5 h-3.5 text-gray-600 dark:text-gray-300" />
+                                <span>{item.timeStart} - {item.timeEnd}</span>
+                              </span>
+                              {item.room && (
+                                <span className="flex items-center gap-1 shrink-0">
+                                  <MapPin className="w-3.5 h-3.5 text-gray-600 dark:text-gray-300" />
+                                  <span>{item.room}</span>
+                                </span>
+                              )}
+                            </div>
+                            {/* Dòng 2: Giáo viên */}
+                            {item.teacher && (
+                              <div className="flex items-center gap-1 text-[11px] sm:text-xs font-medium text-gray-700 dark:text-gray-300 truncate">
+                                <UserCheck className="w-3.5 h-3.5 text-gray-600 dark:text-gray-400 shrink-0" />
+                                <span className="truncate">{item.teacher}</span>
+                              </div>
+                            )}
                           </div>
                           {item.note && (
-                            <div className="mt-1.5 text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50/80 dark:bg-amber-950/40 px-2.5 py-1 rounded-lg border border-amber-200/60 dark:border-amber-900/40">
+                            <div className="mt-1.5 text-[11px] sm:text-xs font-semibold text-amber-950 dark:text-amber-100 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg border border-amber-300/80 dark:border-amber-800/60 leading-snug">
                               {item.note}
                             </div>
                           )}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1 shrink-0">
+                      {/* Căn chỉnh nút Chỉnh sửa và Xóa ngay ngắn, thẳng hàng bên phải mép thẻ */}
+                      <div className="flex items-center gap-0.5 shrink-0 self-start mt-0.5">
                         <button
                           type="button"
                           onClick={(e) => {
@@ -478,7 +638,7 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                             setEditingItem({ ...item });
                             setIsModalOpen(true);
                           }}
-                          className="p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg hover:bg-white/80 dark:hover:bg-gray-800/80 transition-colors"
+                          className="p-1 sm:p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                           title={lang === 'vi' ? 'Chỉnh sửa tiết học' : 'Edit period'}
                         >
                           <Edit2 className="w-4 h-4" />
@@ -489,7 +649,7 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                             e.stopPropagation();
                             handleDelete(item);
                           }}
-                          className="p-1.5 text-gray-400 hover:text-rose-600 rounded-lg hover:bg-rose-50/80 dark:hover:bg-rose-950/40 transition-colors"
+                          className="p-1 sm:p-1.5 text-gray-500 dark:text-gray-400 hover:text-rose-600 rounded-lg hover:bg-rose-50/80 dark:hover:bg-rose-950/40 transition-colors"
                           title={lang === 'vi' ? 'Xóa tiết học' : 'Delete period'}
                         >
                           <Trash2 className="w-4 h-4" />
@@ -503,13 +663,13 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
           </div>
 
           {/* Afternoon Session */}
-          <div className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl p-4 sm:p-5 border border-gray-200 dark:border-gray-800 shadow-xs">
-            <div className="flex items-center gap-2 pb-3.5 border-b border-gray-100 dark:border-gray-800 text-indigo-600 dark:text-indigo-400 font-bold text-sm">
-              <Sunset className="w-5 h-5" />
+          <div className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl p-2.5 sm:p-5 border border-gray-200 dark:border-gray-800 shadow-xs">
+            <div className="flex items-center gap-2 pb-3 border-b border-gray-100 dark:border-gray-800 text-[#744e3a] dark:text-[#cbb09e] font-bold text-sm">
+              <Sunset className="w-5 h-5 text-[#744e3a] dark:text-[#cbb09e]" />
               <span>{t.periods.afternoon}</span>
             </div>
 
-            <div className="space-y-2 sm:space-y-2.5 mt-3">
+            <div className="space-y-2 sm:space-y-2.5 mt-2.5 sm:mt-3">
               {afternoonItems.length === 0 ? (
                 <div className="py-8 text-center text-xs text-gray-400 dark:text-gray-500">
                   {t.periods.noClass}
@@ -524,43 +684,52 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                         setEditingItem({ ...item });
                         setIsModalOpen(true);
                       }}
-                      className={`p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border ${variant.bg} ${variant.border} shadow-2xs flex items-start justify-between gap-3 group transition-all hover:shadow-xs hover:border-[#b89278]/60 cursor-pointer`}
+                      className="p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl bg-white dark:bg-gray-800/95 border border-gray-200/90 border-b-2 border-b-gray-300/75 dark:border-gray-700/80 dark:border-b-gray-950/90 shadow-[0_3px_10px_-2px_rgba(15,23,42,0.08),0_1px_3px_rgba(15,23,42,0.05)] hover:shadow-[0_6px_16px_-3px_rgba(15,23,42,0.12)] hover:-translate-y-0.5 hover:border-emerald-400/70 dark:hover:border-emerald-600/60 flex items-start justify-between gap-2 group transition-all cursor-pointer overflow-hidden relative"
                       title={lang === 'vi' ? 'Nhấn để chỉnh sửa tiết học này' : 'Click to edit this period'}
                     >
-                      <div className="flex items-start gap-3">
+                      <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
                         <div className={`w-9 h-9 rounded-xl ${variant.badgeBg} ${variant.badgeText} font-extrabold flex flex-col items-center justify-center shrink-0 border border-black/5 dark:border-white/5 shadow-2xs`}>
                           <span className={`text-[9px] uppercase font-bold leading-none ${variant.badgeLabel}`}>Tiết</span>
                           <span className="text-sm leading-none mt-0.5 font-black">{item.period}</span>
                         </div>
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm sm:text-[15px] font-bold text-gray-950 dark:text-white line-clamp-1">
                               {item.subject}
                             </h4>
                           </div>
-                          <div className="flex items-center gap-3 text-xs text-gray-600 dark:text-gray-400 mt-1 flex-wrap">
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5 opacity-70" />
-                              {item.timeStart} - {item.timeEnd}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <MapPin className="w-3.5 h-3.5 opacity-70" />
-                              {item.room}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <UserCheck className="w-3.5 h-3.5 opacity-70" />
-                              {item.teacher}
-                            </span>
+                          <div className="text-xs font-medium text-gray-800 dark:text-gray-200 mt-1 space-y-0.5">
+                            {/* Dòng 1: Thời gian và Phòng học cùng 1 dòng */}
+                            <div className="flex items-center gap-2.5 sm:gap-3 flex-nowrap whitespace-nowrap text-[11px] sm:text-xs font-semibold text-gray-800 dark:text-gray-100">
+                              <span className="flex items-center gap-1 shrink-0">
+                                <Clock className="w-3.5 h-3.5 text-gray-600 dark:text-gray-300" />
+                                <span>{item.timeStart} - {item.timeEnd}</span>
+                              </span>
+                              {item.room && (
+                                <span className="flex items-center gap-1 shrink-0">
+                                  <MapPin className="w-3.5 h-3.5 text-gray-600 dark:text-gray-300" />
+                                  <span>{item.room}</span>
+                                </span>
+                              )}
+                            </div>
+                            {/* Dòng 2: Giáo viên */}
+                            {item.teacher && (
+                              <div className="flex items-center gap-1 text-[11px] sm:text-xs font-medium text-gray-700 dark:text-gray-300 truncate">
+                                <UserCheck className="w-3.5 h-3.5 text-gray-600 dark:text-gray-400 shrink-0" />
+                                <span className="truncate">{item.teacher}</span>
+                              </div>
+                            )}
                           </div>
                           {item.note && (
-                            <div className="mt-1.5 text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50/80 dark:bg-amber-950/40 px-2.5 py-1 rounded-lg border border-amber-200/60 dark:border-amber-900/40">
+                            <div className="mt-1.5 text-[11px] sm:text-xs font-semibold text-amber-950 dark:text-amber-100 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg border border-amber-300/80 dark:border-amber-800/60 leading-snug">
                               {item.note}
                             </div>
                           )}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1 shrink-0">
+                      {/* Căn chỉnh nút Chỉnh sửa và Xóa ngay ngắn, thẳng hàng bên phải mép thẻ */}
+                      <div className="flex items-center gap-0.5 shrink-0 self-start mt-0.5">
                         <button
                           type="button"
                           onClick={(e) => {
@@ -568,7 +737,7 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                             setEditingItem({ ...item });
                             setIsModalOpen(true);
                           }}
-                          className="p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg hover:bg-white/80 dark:hover:bg-gray-800/80 transition-colors"
+                          className="p-1 sm:p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                           title={lang === 'vi' ? 'Chỉnh sửa tiết học' : 'Edit period'}
                         >
                           <Edit2 className="w-4 h-4" />
@@ -579,7 +748,7 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                             e.stopPropagation();
                             handleDelete(item);
                           }}
-                          className="p-1.5 text-gray-400 hover:text-rose-600 rounded-lg hover:bg-rose-50/80 dark:hover:bg-rose-950/40 transition-colors"
+                          className="p-1 sm:p-1.5 text-gray-500 dark:text-gray-400 hover:text-rose-600 rounded-lg hover:bg-rose-50/80 dark:hover:bg-rose-950/40 transition-colors"
                           title={lang === 'vi' ? 'Xóa tiết học' : 'Delete period'}
                         >
                           <Trash2 className="w-4 h-4" />
@@ -613,7 +782,7 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                       <div
                         className={`inline-flex items-center justify-center px-2.5 py-1 rounded-xl text-xs font-bold transition-colors ${
                           isToday
-                            ? 'bg-[#b89278] text-white shadow-2xs'
+                            ? 'bg-[#5b3823] text-white shadow-2xs'
                             : 'bg-[#fdfaf7] dark:bg-gray-800/80 border border-[#ebdcd0] dark:border-gray-700 text-[#2c1810] dark:text-[#f8ede3]'
                         }`}
                       >
@@ -716,13 +885,20 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                   <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
                     {t.periods.subject} *
                   </label>
-                  <input
-                    type="text"
-                    required
+                  <SubjectCombobox
                     value={editingItem.subject}
-                    onChange={(e) => setEditingItem({ ...editingItem, subject: e.target.value })}
+                    subjects={subjects}
+                    onChange={(name, selectedSub) => {
+                      setEditingItem({
+                        ...editingItem,
+                        subject: name,
+                        teacher: selectedSub?.teacher || editingItem.teacher,
+                        room: selectedSub?.room || editingItem.room,
+                        color: selectedSub?.color || editingItem.color,
+                      });
+                    }}
                     placeholder="Toán học, Vật lý, Ngữ văn..."
-                    className="w-full px-3 py-2 text-xs sm:text-[13px] rounded-xl border border-[#ebdcd0] dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-xs sm:placeholder:text-[12px] placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-[#b89278] focus:border-[#b89278] outline-none"
+                    required
                   />
                 </div>
 
@@ -860,7 +1036,7 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 rounded-xl text-xs font-semibold bg-[#b89278] hover:bg-[#a68066] text-white shadow-xs transition-colors"
+                    className="px-5 py-2 rounded-xl text-xs font-semibold bg-[#5b3823] hover:bg-[#432817] text-white shadow-xs transition-colors cursor-pointer"
                   >
                     {t.common.save}
                   </button>
@@ -971,7 +1147,7 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                   onClick={() => setPrintScope('day')}
                   className={`px-3 py-1.5 rounded-lg transition-all ${
                     printScope === 'day'
-                      ? 'bg-[#b89278] text-white shadow-xs'
+                      ? 'bg-[#5b3823] text-white shadow-xs'
                       : 'text-gray-600 dark:text-gray-300 hover:text-gray-900'
                   }`}
                 >
@@ -982,11 +1158,11 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                   onClick={() => setPrintScope('week')}
                   className={`px-3 py-1.5 rounded-lg transition-all ${
                     printScope === 'week'
-                      ? 'bg-[#b89278] text-white shadow-xs'
+                      ? 'bg-[#5b3823] text-white shadow-xs'
                       : 'text-gray-600 dark:text-gray-300 hover:text-gray-900'
                   }`}
                 >
-                  {lang === 'vi' ? 'Toàn Tuần' : 'Full Week'}
+                  {lang === 'vi' ? 'Theo Tuần' : 'By Week'}
                 </button>
               </div>
 
@@ -1000,7 +1176,7 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                       onClick={() => setSelectedDay(d.num)}
                       className={`px-2 py-1 text-xs rounded-lg font-semibold transition-all border ${
                         selectedDay === d.num
-                          ? 'bg-[#b89278] text-white border-[#a88268]'
+                          ? 'bg-[#5b3823] text-white border-[#432817]'
                           : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-[#f5ebe1]'
                       }`}
                     >
@@ -1119,7 +1295,7 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                   onClick={handleExportPdf}
                   disabled={isExportingPdf}
                   title={lang === 'vi' ? 'Xuất Thời khóa biểu thành file .pdf' : 'Export Timetable as .pdf file'}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#b89278] hover:bg-[#a68066] text-white text-xs font-semibold shadow-xs transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#5b3823] hover:bg-[#432817] text-white text-xs font-semibold shadow-xs transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {isExportingPdf ? (
                     <>
@@ -1152,6 +1328,73 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
               </div>
             </div>
 
+            {/* Mobile/Desktop Ready Action Bar or Error Banner */}
+            {pdfError && (
+              <div className="px-4 py-2.5 bg-rose-50 dark:bg-rose-950/50 border-b border-rose-200 dark:border-rose-800/60 flex items-center gap-2 text-xs font-semibold text-rose-700 dark:text-rose-300 shrink-0">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{pdfError}</span>
+              </div>
+            )}
+
+            {pdfResult && (
+              <div className="px-3.5 sm:px-5 py-2.5 bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-800/60 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <div className="flex items-center gap-2 text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span>
+                    {lang === 'vi'
+                      ? 'File PDF đã sẵn sàng! Chọn cách lưu trên điện thoại:'
+                      : 'PDF ready! Save or share on mobile:'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      shareGeneratedPdf(
+                        pdfResult,
+                        lang === 'vi'
+                          ? `Thời khóa biểu ${activeClass.className}`
+                          : `Timetable ${activeClass.className}`
+                      )
+                    }
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>{lang === 'vi' ? 'Chia sẻ / Lưu PDF' : 'Share / Save PDF'}</span>
+                  </button>
+                  <a
+                    href={pdfResult.pdfBlobUrl}
+                    download={pdfResult.filename}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      triggerAnchorDownload(pdfResult.pdfBlobUrl, pdfResult.filename);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white dark:bg-gray-800 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100/60 text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    <FileDown className="w-3.5 h-3.5" />
+                    <span>{lang === 'vi' ? 'Tải .PDF' : 'Download .PDF'}</span>
+                  </a>
+                  {pdfResult.pngBlobUrl && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        shareOrDownloadPng(
+                          pdfResult,
+                          lang === 'vi'
+                            ? `Thời khóa biểu ${activeClass.className}`
+                            : `Timetable ${activeClass.className}`
+                        )
+                      }
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white dark:bg-gray-800 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100/60 text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      <ImageIcon className="w-3.5 h-3.5" />
+                      <span>{lang === 'vi' ? 'Lưu ảnh (.PNG)' : 'Save PNG'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Printable Preview Sheet Area */}
             <div className="p-4 sm:p-6 overflow-y-auto grow bg-gray-100/70 dark:bg-gray-950/70">
               <div
@@ -1166,14 +1409,13 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                   <h2 className="text-xl sm:text-2xl font-black tracking-tight text-[#2c1810] uppercase">
                     {lang === 'vi' ? 'THỜI KHÓA BIỂU HỌC TẬP' : 'CLASS SCHEDULE TIMETABLE'}
                   </h2>
-                  {(studentProfile?.fullName || studentProfile?.school || studentProfile?.classGrade) && (
-                    <div className="text-xs font-semibold text-gray-700 mt-1">
-                      {studentProfile.school && <span className="uppercase">{studentProfile.school} • </span>}
-                      {studentProfile.fullName && <span>{lang === 'vi' ? 'Học sinh: ' : 'Student: '}{studentProfile.fullName}</span>}
-                      {studentProfile.classGrade && <span> • {lang === 'vi' ? 'Lớp: ' : 'Class: '}{studentProfile.classGrade}</span>}
-                      {studentProfile.academicYear && <span> • NH: {studentProfile.academicYear}</span>}
-                    </div>
-                  )}
+                  <div className="text-xs font-semibold text-gray-700 mt-1">
+                    {studentProfile.school && <span className="uppercase">{studentProfile.school} • </span>}
+                    <span className="font-bold text-[#5b3823]">{lang === 'vi' ? 'Lớp: ' : 'Class: '}{activeClass.className}</span>
+                    {activeClass.room && <span> • {lang === 'vi' ? 'Phòng: ' : 'Room: '}{activeClass.room}</span>}
+                    {activeClass.homeroomTeacher && <span> • {lang === 'vi' ? 'GVCN: ' : 'Teacher: '}{activeClass.homeroomTeacher}</span>}
+                    {activeClass.academicYear && <span> • NH: {activeClass.academicYear}</span>}
+                  </div>
                   <div className="flex items-center justify-center gap-4 text-xs font-medium text-gray-600 mt-1.5 flex-wrap">
                     <span>
                       {printScope === 'day'
@@ -1344,7 +1586,7 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
                   type="button"
                   onClick={handleExportPdf}
                   disabled={isExportingPdf}
-                  className="flex items-center gap-1.5 px-4 sm:px-5 py-2 rounded-xl text-xs font-semibold bg-[#b89278] hover:bg-[#a68066] text-white shadow-xs transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                  className="flex items-center gap-1.5 px-4 sm:px-5 py-2 rounded-xl text-xs font-semibold bg-[#5b3823] hover:bg-[#432817] text-white shadow-xs transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {isExportingPdf ? (
                     <>
@@ -1368,6 +1610,8 @@ export const ClassScheduleView: React.FC<ClassScheduleViewProps> = ({
           </div>
         </div>
       )}
+
+
     </div>
   );
 };

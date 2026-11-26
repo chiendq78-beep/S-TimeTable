@@ -5,19 +5,17 @@ import {
   Moon,
   Globe,
   Bell,
-  HardDrive,
-  Download,
-  RotateCcw,
   CheckCircle2,
-  Info,
-  Laptop,
   Sparkles,
+  School,
+  BookOpen,
+  RotateCcw,
+  ExternalLink,
 } from 'lucide-react';
 import { Language, Theme } from '../types';
 import { translations } from '../i18n/translations';
 import { NotificationService } from '../services/notification';
 import { StorageService } from '../services/storage';
-import { useSwipeToCloseModal } from '../hooks/useSwipeToCloseModal';
 
 interface SystemSettingsViewProps {
   theme: Theme;
@@ -26,6 +24,10 @@ interface SystemSettingsViewProps {
   onLanguageChange: (lang: Language) => void;
   onResetData?: () => void;
   onNavigateNotifications?: () => void;
+  onNavigateSubjects?: () => void;
+  onNavigateClasses?: () => void;
+  onSyncTimetables?: () => void;
+  onShowToast?: (msg: string) => void;
 }
 
 export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
@@ -35,13 +37,12 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   onLanguageChange,
   onResetData,
   onNavigateNotifications,
+  onNavigateSubjects,
+  onNavigateClasses,
 }) => {
   const t = translations[lang];
-  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
-  const { modalTouchHandlers } = useSwipeToCloseModal({
-    isOpen: isResetModalOpen,
-    onClose: () => setIsResetModalOpen(false),
-  });
+
+  // Notification permission state
   const [hasNotificationPerm, setHasNotificationPerm] = useState(() => {
     return typeof window !== 'undefined' && 'Notification' in window
       ? Notification.permission === 'granted'
@@ -61,51 +62,13 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     }
   };
 
-  const handleExportBackup = () => {
-    try {
-      const backupData = {
-        exportedAt: new Date().toISOString(),
-        profile: StorageService.getStudentProfile(),
-        timetable: StorageService.getTimetable(),
-        extraClasses: StorageService.getExtraClasses(),
-        exams: StorageService.getExams(),
-        homework: StorageService.getHomework(),
-        grades: StorageService.getGrades(),
-        notices: StorageService.getNotices(),
-        theme,
-        language: lang,
-      };
-
-      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backupData, null, 2));
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute('href', dataStr);
-      downloadAnchor.setAttribute(
-        'download',
-        `sotay_hocsinh_backup_${new Date().toISOString().slice(0, 10)}.json`
-      );
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-    } catch {
-      // fallback
-    }
-  };
-
-  const handleConfirmReset = () => {
-    if (onResetData) {
-      onResetData();
-    } else {
-      StorageService.resetToSeedData();
-      window.location.reload();
-    }
-    setIsResetModalOpen(false);
-  };
+  const timetables = StorageService.getClassTimetables();
 
   return (
-    <div className="space-y-4 max-w-4xl mx-auto">
-      {/* Header Bar */}
-      <div className="flex items-center justify-between gap-3 bg-white dark:bg-gray-900 p-3.5 sm:p-4 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 shadow-xs">
-        <div className="flex items-center gap-2.5">
+    <div className="max-w-4xl mx-auto space-y-4 sm:space-y-5 animate-fadeIn pb-12">
+      {/* Top Header Card */}
+      <div className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 p-4 sm:p-5 shadow-xs">
+        <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-[#5b3823]/10 dark:bg-[#d7b89f]/20 text-[#5b3823] dark:text-[#d7b89f] flex items-center justify-center shrink-0">
             <Settings className="w-5 h-5" />
           </div>
@@ -120,7 +83,45 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
         </div>
       </div>
 
-      {/* 1. GIAO DIỆN (TỐI / SÁNG) - PRIMARY SECTION */}
+      {/* 1. SHORTCUT: QUẢN LÝ LỚP HỌC */}
+      <section className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-[#ebdcd0] dark:bg-gray-800 text-[#5b3823] dark:text-[#d7b89f] flex items-center justify-center shrink-0 mt-0.5">
+              <School className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm sm:text-base font-bold text-gray-900 dark:text-white">
+                  {lang === 'vi' ? 'Quản Lý Lớp Học' : 'Class Management'}
+                </h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#faf6f0] dark:bg-gray-800 text-[#5b3823] dark:text-[#d7b89f] border border-[#ebdcd0] dark:border-gray-700">
+                  {timetables.length} {t.classTimetable.classCount}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 max-w-xl">
+                {lang === 'vi'
+                  ? 'Quản lý thông tin chi tiết lớp, thêm lớp mới, chỉnh sửa và chuyển đổi thời khóa biểu'
+                  : 'Manage class details, add new classes, edit, duplicate, and switch timetables'}
+              </p>
+            </div>
+          </div>
+
+          {onNavigateClasses && (
+            <button
+              type="button"
+              onClick={onNavigateClasses}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#5b3823] hover:bg-[#72462c] text-white transition-colors shadow-xs cursor-pointer shrink-0"
+            >
+              <School className="w-4 h-4" />
+              <span>{lang === 'vi' ? 'Mở Quản lý lớp' : 'Manage Classes'}</span>
+              <ExternalLink className="w-3.5 h-3.5 ml-0.5" />
+            </button>
+          )}
+        </div>
+      </section>
+
+      {/* 2. GIAO DIỆN (TỐI / SÁNG) */}
       <section className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 p-3.5 sm:p-4 shadow-xs">
         <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-gray-100 dark:border-gray-800">
           <h3 className="text-sm sm:text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -139,7 +140,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
             type="button"
             id="theme-light-card"
             onClick={() => onThemeChange('light')}
-            className={`flex items-center justify-between p-3 rounded-xl border-2 transition-all text-left ${
+            className={`flex items-center justify-between p-3 rounded-xl border-2 transition-all text-left cursor-pointer ${
               theme === 'light'
                 ? 'border-[#5b3823] bg-amber-50/50 dark:bg-amber-950/20 shadow-xs'
                 : 'border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 bg-gray-50/40 dark:bg-gray-850/40'
@@ -176,7 +177,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
             type="button"
             id="theme-dark-card"
             onClick={() => onThemeChange('dark')}
-            className={`flex items-center justify-between p-3 rounded-xl border-2 transition-all text-left ${
+            className={`flex items-center justify-between p-3 rounded-xl border-2 transition-all text-left cursor-pointer ${
               theme === 'dark'
                 ? 'border-[#d7b89f] bg-[#221711] shadow-xs'
                 : 'border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 bg-gray-50/40 dark:bg-gray-850/40'
@@ -210,7 +211,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
         </div>
       </section>
 
-      {/* 2. NGÔN NGỮ (LANGUAGE) */}
+      {/* 3. NGÔN NGỮ (LANGUAGE) */}
       <section className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 p-3.5 sm:p-4 shadow-xs">
         <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-gray-100 dark:border-gray-800">
           <h3 className="text-sm sm:text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -226,7 +227,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
           <button
             type="button"
             onClick={() => onLanguageChange('vi')}
-            className={`flex items-center justify-between p-2.5 sm:p-3 rounded-xl border text-left transition-all ${
+            className={`flex items-center justify-between p-2.5 sm:p-3 rounded-xl border text-left transition-all cursor-pointer ${
               lang === 'vi'
                 ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/20 text-blue-900 dark:text-blue-200 ring-2 ring-blue-500/20 font-bold'
                 : 'border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 text-gray-700 dark:text-gray-300'
@@ -244,7 +245,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
           <button
             type="button"
             onClick={() => onLanguageChange('en')}
-            className={`flex items-center justify-between p-2.5 sm:p-3 rounded-xl border text-left transition-all ${
+            className={`flex items-center justify-between p-2.5 sm:p-3 rounded-xl border text-left transition-all cursor-pointer ${
               lang === 'en'
                 ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/20 text-blue-900 dark:text-blue-200 ring-2 ring-blue-500/20 font-bold'
                 : 'border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 text-gray-700 dark:text-gray-300'
@@ -261,7 +262,40 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
         </div>
       </section>
 
-      {/* 3. THÔNG BÁO VÀ NHẮC NHỞ */}
+      {/* 4. DANH SÁCH MÔN HỌC */}
+      <section className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-[#ebdcd0]/70 dark:bg-gray-800 text-[#5b3823] dark:text-[#d7b89f] flex items-center justify-center shrink-0 mt-0.5">
+              <BookOpen className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-gray-900 dark:text-white">
+                {lang === 'vi' ? 'Danh Sách Môn Học' : 'Subject Management'}
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 max-w-xl">
+                {lang === 'vi'
+                  ? 'Quản lý danh mục các môn học, mã viết tắt, màu sắc nhận diện và áp dụng theo lớp'
+                  : 'Manage list of subjects, codes, color tags, and per-class configurations'}
+              </p>
+            </div>
+          </div>
+
+          {onNavigateSubjects && (
+            <button
+              type="button"
+              onClick={onNavigateSubjects}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#5b3823] hover:bg-[#72462c] text-white transition-colors shadow-xs cursor-pointer shrink-0"
+            >
+              <BookOpen className="w-4 h-4" />
+              <span>{lang === 'vi' ? 'Quản lý Môn học' : 'Manage Subjects'}</span>
+              <ExternalLink className="w-3.5 h-3.5 ml-0.5" />
+            </button>
+          )}
+        </div>
+      </section>
+
+      {/* 5. THÔNG BÁO VÀ NHẮC NHỞ */}
       <section className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
@@ -283,9 +317,9 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
               <button
                 type="button"
                 onClick={onNavigateNotifications}
-                className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/60 border border-blue-200 dark:border-blue-800 transition-colors shadow-xs"
+                className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/60 border border-blue-200 dark:border-blue-800 transition-colors shadow-xs cursor-pointer"
               >
-                {lang === 'vi' ? 'Mở Trung tâm Thông báo' : 'Open Notification Center'}
+                {lang === 'vi' ? 'Mở Quản lý thông báo' : 'Open Notification Management'}
               </button>
             )}
             {hasNotificationPerm ? (
@@ -297,7 +331,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
               <button
                 type="button"
                 onClick={handleRequestNotification}
-                className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-[#5b3823] text-white hover:bg-[#72462c] transition-colors shadow-xs"
+                className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-[#5b3823] text-white hover:bg-[#72462c] transition-colors shadow-xs cursor-pointer"
               >
                 {t.system.requestPermBtn}
               </button>
@@ -306,117 +340,34 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
         </div>
       </section>
 
-      {/* 4. DỮ LIỆU & SAO LƯU */}
-      <section className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 shadow-xs">
-        <div className="flex items-start gap-3 mb-4">
-          <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0 mt-0.5">
-            <HardDrive className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="text-sm sm:text-base font-bold text-gray-900 dark:text-white">
-              {t.system.storageSection}
-            </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              {t.system.storageDesc}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2.5 pt-2">
-          <button
-            type="button"
-            id="export-backup-btn"
-            onClick={handleExportBackup}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 transition-colors"
-          >
-            <Download className="w-3.5 h-3.5 text-[#5b3823] dark:text-[#d7b89f]" />
-            <span>{t.system.exportBackup}</span>
-          </button>
-
-          <button
-            type="button"
-            id="reset-data-btn"
-            onClick={() => setIsResetModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 transition-colors"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>{t.system.resetData}</span>
-          </button>
-        </div>
-      </section>
-
-      {/* 5. THÔNG TIN HỆ THỐNG */}
-      <section className="bg-gray-50/75 dark:bg-gray-850/60 rounded-xl sm:rounded-2xl border border-gray-200/80 dark:border-gray-800 p-4 sm:p-5 text-xs text-gray-500 dark:text-gray-400">
-        <div className="flex items-center gap-2 font-bold text-gray-700 dark:text-gray-300 mb-3">
-          <Info className="w-4 h-4 text-gray-500" />
-          <span>{t.system.aboutSection}</span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="p-3 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
-            <span className="block text-[11px] text-gray-400 font-medium">
-              {t.system.version}
-            </span>
-            <span className="font-bold text-gray-900 dark:text-white text-xs sm:text-sm">
-              v2.4.0 (2026 Edition)
-            </span>
-          </div>
-          <div className="p-3 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
-            <span className="block text-[11px] text-gray-400 font-medium">
-              {t.system.platform}
-            </span>
-            <span className="font-bold text-gray-900 dark:text-white text-xs sm:text-sm flex items-center gap-1.5">
-              <Laptop className="w-3.5 h-3.5 text-blue-500" />
-              PWA / Web Local
-            </span>
-          </div>
-          <div className="p-3 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
-            <span className="block text-[11px] text-gray-400 font-medium">
-              {t.system.status}
-            </span>
-            <span className="font-bold text-emerald-600 dark:text-emerald-400 text-xs sm:text-sm flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              {t.system.statusReady}
-            </span>
-          </div>
-        </div>
-      </section>
-
-      {/* Modal Confirm Reset */}
-      {isResetModalOpen && (
-        <div
-          {...modalTouchHandlers}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
-        >
-          <div className="bg-white dark:bg-gray-900 rounded-2xl p-5 sm:p-6 max-w-sm w-full border border-gray-200 dark:border-gray-800 shadow-2xl space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 flex items-center justify-center mx-auto">
-              <RotateCcw className="w-6 h-6" />
+      {/* 6. KHÔI PHỤC DỮ LIỆU */}
+      {onResetData && (
+        <section className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 mt-0.5">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm sm:text-base font-bold text-gray-900 dark:text-white">
+                  {lang === 'vi' ? 'Khôi phục Dữ liệu Mẫu' : 'Reset Sample Data'}
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 max-w-xl">
+                  {lang === 'vi'
+                    ? 'Đặt lại toàn bộ dữ liệu thời khóa biểu, lịch học thêm, lịch thi, bài tập và bảng điểm về trạng thái ban đầu.'
+                    : 'Reset all timetable, tutoring, exams, homework, and grade records back to initial sample state.'}
+                </p>
+              </div>
             </div>
-            <div className="text-center">
-              <h3 className="text-base font-bold text-gray-900 dark:text-white">
-                {t.system.resetConfirmTitle}
-              </h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 leading-relaxed">
-                {t.system.resetConfirmDesc}
-              </p>
-            </div>
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsResetModalOpen(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              >
-                {t.common.cancel}
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmReset}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-sm transition-colors"
-              >
-                {t.system.resetData}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={onResetData}
+              className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-800 transition-colors shadow-xs cursor-pointer shrink-0 self-start sm:self-auto"
+            >
+              {lang === 'vi' ? 'Khôi phục mặc định' : 'Reset Data'}
+            </button>
           </div>
-        </div>
+        </section>
       )}
     </div>
   );

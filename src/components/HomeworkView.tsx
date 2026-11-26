@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   CheckSquare,
   Plus,
@@ -16,26 +16,54 @@ import {
   Flag,
   X,
 } from 'lucide-react';
-import { HomeworkItem, Priority, HomeworkStatus, Language } from '../types';
+import { HomeworkItem, Priority, HomeworkStatus, Language, SubjectItem } from '../types';
 import { translations } from '../i18n/translations';
 import { NotificationService } from '../services/notification';
 import { useSwipeToCloseModal } from '../hooks/useSwipeToCloseModal';
+import { SubjectCombobox } from './SubjectCombobox';
 
 interface HomeworkViewProps {
   homeworkList: HomeworkItem[];
   onSaveHomework: (items: HomeworkItem[]) => void;
   lang: Language;
+  openDetailId?: string;
+  openDetailSubject?: string;
+  onClearOpenDetailId?: () => void;
+  subjects?: SubjectItem[];
 }
 
 export const HomeworkView: React.FC<HomeworkViewProps> = ({
   homeworkList,
   onSaveHomework,
   lang,
+  openDetailId,
+  openDetailSubject,
+  onClearOpenDetailId,
+  subjects,
 }) => {
   const t = translations[lang];
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [editingItem, setEditingItem] = useState<HomeworkItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Automatically open detail / edit modal when navigated from notification
+  useEffect(() => {
+    if (openDetailId || openDetailSubject) {
+      const target =
+        (openDetailId && homeworkList.find((h) => h.id === openDetailId)) ||
+        (openDetailSubject &&
+          homeworkList.find(
+            (h) => h.subject.toLowerCase() === openDetailSubject.toLowerCase()
+          ));
+      if (target) {
+        setEditingItem(target);
+        setIsModalOpen(true);
+      }
+      if (onClearOpenDetailId) {
+        onClearOpenDetailId();
+      }
+    }
+  }, [openDetailId, openDetailSubject, homeworkList, onClearOpenDetailId]);
 
   // Swipe-to-close on mobile/tablet
   const { modalTouchHandlers } = useSwipeToCloseModal({
@@ -299,46 +327,48 @@ export const HomeworkView: React.FC<HomeworkViewProps> = ({
 
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-md ${
+                      <span className={`text-xs font-extrabold px-2 py-0.5 rounded-md ${
                         isDone
-                          ? 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                          : 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300'
+                          ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                          : 'bg-blue-50 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200 border border-blue-200/60 dark:border-blue-800/50'
                       }`}>
                         {item.subject}
                       </span>
-                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
                         isDone
-                          ? 'opacity-60 bg-gray-100 dark:bg-gray-800 text-gray-400'
+                          ? 'opacity-70 bg-gray-100 dark:bg-gray-800 text-gray-500'
                           : priorityBadges[item.priority].class
                       }`}>
                         {priorityBadges[item.priority].label}
                       </span>
-                      <span className={`text-[11px] px-2 py-0.5 rounded-md border ${urgency.color}`}>
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${urgency.color}`}>
                         {urgency.label}
                       </span>
                     </div>
 
                     <h4
-                      className={`text-sm transition-colors truncate ${
+                      className={`text-sm sm:text-[15px] transition-colors truncate ${
                         isDone
-                          ? 'line-through text-gray-400 dark:text-gray-500 font-normal'
-                          : 'font-bold text-gray-900 dark:text-white'
+                          ? 'line-through text-gray-500 dark:text-gray-400 font-medium'
+                          : 'font-extrabold text-gray-950 dark:text-white'
                       }`}
                     >
                       {item.title}
                     </h4>
 
                     {item.description && (
-                      <p className={`text-xs mt-1 line-clamp-2 ${
-                        isDone ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-500 dark:text-gray-400'
+                      <p className={`text-xs mt-1 line-clamp-2 font-medium ${
+                        isDone ? 'text-gray-500 dark:text-gray-500 line-through' : 'text-gray-700 dark:text-gray-300'
                       }`}>
                         {item.description}
                       </p>
                     )}
 
-                    <div className="flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500 mt-2">
+                    <div className={`flex items-center gap-3 text-xs font-semibold mt-2 ${
+                      isDone ? 'text-gray-500 dark:text-gray-500' : 'text-gray-700 dark:text-gray-300'
+                    }`}>
                       <span className="flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5" />
+                        <Clock className="w-3.5 h-3.5 text-gray-600 dark:text-gray-400" />
                         {new Date(item.deadline).toLocaleString('vi-VN', {
                           day: '2-digit',
                           month: '2-digit',
@@ -358,13 +388,13 @@ export const HomeworkView: React.FC<HomeworkViewProps> = ({
                       setEditingItem(item);
                       setIsModalOpen(true);
                     }}
-                    className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                   >
                     <Edit2 className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => handleDelete(item.id)}
-                    className="p-2 text-gray-400 hover:text-rose-600 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                    className="p-2 text-gray-500 dark:text-gray-400 hover:text-rose-600 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -424,16 +454,17 @@ export const HomeworkView: React.FC<HomeworkViewProps> = ({
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                      {t.periods.subject} *
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1 flex items-center justify-between">
+                      <span>{t.periods.subject} <span className="text-rose-500">*</span></span>
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-normal">Chọn từ danh mục</span>
                     </label>
-                    <input
-                      type="text"
+                    <SubjectCombobox
                       required
                       value={editingItem.subject}
-                      onChange={(e) => setEditingItem({ ...editingItem, subject: e.target.value })}
+                      subjects={subjects}
+                      onChange={(name) => setEditingItem({ ...editingItem, subject: name })}
                       placeholder="Toán, Anh..."
-                      className="w-full px-3 py-2 text-xs sm:text-[13px] rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-xs sm:placeholder:text-[12px] placeholder:text-gray-400 dark:placeholder:text-gray-500 outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full pl-3 pr-9 py-2 text-xs sm:text-[13px] rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-gray-400 outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
                   <div>

@@ -4,7 +4,6 @@ import {
   Plus,
   Edit2,
   Trash2,
-  TrendingUp,
   AlertTriangle,
   CheckCircle,
   Lightbulb,
@@ -19,16 +18,19 @@ import {
   Target,
   ArrowUpRight,
 } from 'lucide-react';
-import { SubjectGrade, StudentProfile, Language } from '../types';
+import { SubjectGrade, StudentProfile, Language, SubjectItem } from '../types';
 import { translations } from '../i18n/translations';
 import { GradeReportPdfModal } from './GradeReportPdfModal';
 import { useSwipeToCloseModal } from '../hooks/useSwipeToCloseModal';
+import { SubjectCombobox } from './SubjectCombobox';
 
 interface GradebookViewProps {
   grades: SubjectGrade[];
   onSaveGrades: (items: SubjectGrade[]) => void;
   lang: Language;
   profile?: StudentProfile;
+  subjects?: SubjectItem[];
+  onShowToast?: (msg: string) => void;
 }
 
 export const GradebookView: React.FC<GradebookViewProps> = ({
@@ -36,19 +38,28 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
   onSaveGrades,
   lang,
   profile,
+  subjects,
+  onShowToast,
 }) => {
   const t = translations[lang];
   const [selectedSemester, setSelectedSemester] = useState<'sem1' | 'sem2' | 'fullYear'>('sem1');
   const [editingItem, setEditingItem] = useState<SubjectGrade | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<SubjectGrade | null>(null);
 
   // Swipe-to-close on mobile/tablet
   const { modalTouchHandlers } = useSwipeToCloseModal({
-    isOpen: isModalOpen,
+    isOpen: isModalOpen || itemToDelete !== null || isPdfModalOpen,
     onClose: () => {
-      setIsModalOpen(false);
-      setEditingItem(null);
+      if (itemToDelete) {
+        setItemToDelete(null);
+      } else if (isPdfModalOpen) {
+        setIsPdfModalOpen(false);
+      } else if (isModalOpen) {
+        setIsModalOpen(false);
+        setEditingItem(null);
+      }
     },
   });
   const [oralInput, setOralInput] = useState<string>('');
@@ -257,8 +268,6 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
     totalCoefficient > 0
       ? Math.round((totalWeightedScore / totalCoefficient) * 10) / 10
       : 0;
-  const overallGpa4 = convertTo4Scale(overallAverage10);
-  const rank = getAcademicRank(overallAverage10);
 
   // Identify strong subjects (>= 8.5) and need improvement (< 8.0)
   const strongSubjects = currentGrades
@@ -269,8 +278,30 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
     .filter((g) => getDisplaySubjectAverage(g) < 8.0)
     .sort((a, b) => getDisplaySubjectAverage(a) - getDisplaySubjectAverage(b));
 
-  const handleDelete = (id: string) => {
-    onSaveGrades(grades.filter((g) => g.id !== id));
+  const handleOpenDelete = (item: SubjectGrade) => {
+    setItemToDelete(item);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!itemToDelete) return;
+    const deletedName = itemToDelete.subjectName;
+    const nextGrades = grades.filter((g) => g.id !== itemToDelete.id);
+    onSaveGrades(nextGrades);
+
+    // If edit modal is open for this item, close it
+    if (editingItem && editingItem.id === itemToDelete.id) {
+      setIsModalOpen(false);
+      setEditingItem(null);
+    }
+    setItemToDelete(null);
+
+    if (onShowToast) {
+      onShowToast(
+        lang === 'vi'
+          ? `Đã xóa điểm môn "${deletedName}"`
+          : `Deleted grades for "${deletedName}"`
+      );
+    }
   };
 
   const handleOpenAdd = () => {
@@ -391,50 +422,20 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
         </div>
       </div>
 
-      {/* Overview Stat Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-1 lg:grid-cols-3 gap-2 sm:gap-4">
-        <div className="bg-white dark:bg-gray-900 px-3.5 py-2 sm:px-5 sm:py-4 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 shadow-2xs flex items-center gap-2.5 sm:gap-4">
-          <div className="w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-2xl bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
-            <Award className="w-4 h-4 sm:w-6 sm:h-6" />
+      {/* Overview Stat Card */}
+      <div className="bg-white dark:bg-gray-900 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 shadow-2xs flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+            <Award className="w-4.5 h-4.5" />
           </div>
-          <div className="flex-1 min-w-0 flex items-center justify-between gap-2 sm:gap-3">
-            <span className="text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 truncate">
+          <div>
+            <div className="text-xs sm:text-sm font-bold text-gray-900 dark:text-gray-100">
               {selectedSemester === 'fullYear' ? t.grades.fullYearAverage : t.grades.averageScore}
-            </span>
-            <div className="text-base sm:text-xl font-black text-gray-900 dark:text-white flex items-baseline gap-1 shrink-0">
-              {overallAverage10} <span className="text-[11px] sm:text-xs font-semibold text-gray-400">/ 10</span>
             </div>
           </div>
         </div>
-
-        <div className="bg-white dark:bg-gray-900 px-3.5 py-2 sm:px-5 sm:py-4 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 shadow-2xs flex items-center gap-2.5 sm:gap-4">
-          <div className="w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-2xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-            <TrendingUp className="w-4 h-4 sm:w-6 sm:h-6" />
-          </div>
-          <div className="flex-1 min-w-0 flex items-center justify-between gap-2 sm:gap-3">
-            <span className="text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 truncate">
-              {t.grades.convertedGPA}
-            </span>
-            <div className="text-base sm:text-xl font-black text-blue-600 dark:text-blue-400 flex items-baseline gap-1 shrink-0">
-              {overallGpa4.toFixed(2)} <span className="text-[11px] sm:text-xs font-semibold text-gray-400">/ 4.0</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-900 px-3.5 py-2 sm:px-5 sm:py-4 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 shadow-2xs flex items-center gap-2.5 sm:gap-4">
-          <div className="w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-            <CheckCircle className="w-4 h-4 sm:w-6 sm:h-6" />
-          </div>
-          <div className="flex-1 min-w-0 flex items-center justify-between gap-2 sm:gap-3">
-            <span className="text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 truncate">
-              {t.grades.academicRank}
-            </span>
-            <div className="shrink-0">
-              <span className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md sm:rounded-lg text-[11px] sm:text-xs font-extrabold ${rank.color}`}>
-                {rank.label}
-              </span>
-            </div>
-          </div>
+        <div className="text-base sm:text-xl font-black text-gray-950 dark:text-white flex items-baseline gap-1 shrink-0">
+          {overallAverage10} <span className="text-xs sm:text-sm font-bold text-gray-600 dark:text-gray-400">/ 10</span>
         </div>
       </div>
 
@@ -456,7 +457,7 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
         <div className="relative z-10 pt-8 pb-4">
           <div className="relative flex">
             {/* Y-Axis scale numbers on the left */}
-            <div className="w-8 sm:w-10 shrink-0 h-64 flex flex-col justify-between text-[10px] font-bold text-gray-400 dark:text-gray-500 pr-2 select-none border-r border-gray-200 dark:border-gray-800">
+            <div className="w-8 sm:w-10 shrink-0 h-64 flex flex-col justify-between text-[10px] font-bold text-gray-600 dark:text-gray-400 pr-2 select-none border-r border-gray-200 dark:border-gray-800">
               <span className="leading-none text-right">10</span>
               <span className="leading-none text-right">8.0</span>
               <span className="leading-none text-right">6.5</span>
@@ -547,12 +548,12 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
                       {/* Subject Label Horizontal */}
                       <div className="h-11 flex flex-col items-center justify-start select-none pt-2 px-1 text-center w-full">
                         <span
-                          className="text-[11px] sm:text-xs font-bold text-gray-700 dark:text-gray-300 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors whitespace-nowrap"
+                          className="text-[11px] sm:text-xs font-extrabold text-gray-900 dark:text-gray-100 group-hover:text-purple-700 dark:group-hover:text-purple-400 transition-colors whitespace-nowrap"
                           title={`${g.subjectName} (hs ${g.coefficient})`}
                         >
                           {g.subjectName}
                         </span>
-                        <span className="text-[10px] text-gray-400 dark:text-gray-500 font-medium leading-none mt-0.5">
+                        <span className="text-[10px] text-gray-600 dark:text-gray-400 font-bold leading-none mt-0.5">
                           (x{g.coefficient})
                         </span>
                       </div>
@@ -570,14 +571,14 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[700px] text-xs">
             <thead>
-              <tr className="border-b border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 bg-gray-50/80 dark:bg-gray-800/60 font-bold">
-                <th className="py-3.5 px-4 text-left font-bold text-gray-900 dark:text-gray-100">{t.periods.subject}</th>
-                <th className="py-3.5 px-3 text-center font-bold text-gray-700 dark:text-gray-300">{t.grades.oral}</th>
-                <th className="py-3.5 px-3 text-center font-bold text-gray-700 dark:text-gray-300">{t.grades.quiz15}</th>
-                <th className="py-3.5 px-3 text-center font-bold text-gray-700 dark:text-gray-300">{t.grades.midTerm}</th>
-                <th className="py-3.5 px-3 text-center font-bold text-gray-700 dark:text-gray-300">{t.grades.final}</th>
-                <th className="py-3.5 px-4 text-center font-extrabold text-gray-900 dark:text-white">{t.grades.subjectAverage}</th>
-                <th className="py-3.5 px-3 text-center font-bold text-gray-700 dark:text-gray-300">{t.common.actions}</th>
+              <tr className="border-b border-gray-200 dark:border-gray-800 text-gray-900 dark:text-white bg-gray-100/70 dark:bg-gray-800/70 font-extrabold">
+                <th className="py-3.5 px-4 text-left font-extrabold text-gray-950 dark:text-white">{t.periods.subject}</th>
+                <th className="py-3.5 px-3 text-center font-extrabold text-gray-900 dark:text-gray-100">{t.grades.oral}</th>
+                <th className="py-3.5 px-3 text-center font-extrabold text-gray-900 dark:text-gray-100">{t.grades.quiz15}</th>
+                <th className="py-3.5 px-3 text-center font-extrabold text-gray-900 dark:text-gray-100">{t.grades.midTerm}</th>
+                <th className="py-3.5 px-3 text-center font-extrabold text-gray-900 dark:text-gray-100">{t.grades.final}</th>
+                <th className="py-3.5 px-4 text-center font-black text-gray-950 dark:text-white">{t.grades.subjectAverage}</th>
+                <th className="py-3.5 px-3 text-center font-extrabold text-gray-900 dark:text-gray-100">{t.common.actions}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -591,12 +592,12 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
                   className="hover:bg-purple-50/40 dark:hover:bg-purple-950/20 transition-colors cursor-pointer group"
                   title={lang === 'vi' ? `Bấm để sửa điểm môn ${g.subjectName}` : `Click to edit ${g.subjectName}`}
                 >
-                  <td className="py-3 px-4 font-bold text-gray-900 dark:text-white">
+                  <td className="py-3 px-4 font-extrabold text-gray-950 dark:text-white">
                     <div className="flex items-center gap-2">
-                      <span className="group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors font-bold">
+                      <span className="group-hover:text-purple-700 dark:group-hover:text-purple-400 transition-colors font-extrabold">
                         {g.subjectName}
                       </span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 font-medium">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold border border-gray-200/70 dark:border-gray-700">
                         x{g.coefficient}
                       </span>
                     </div>
@@ -608,13 +609,13 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
                         g.oralScores.map((score, idx) => (
                           <span
                             key={idx}
-                            className="inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-mono font-semibold text-[11px] border border-gray-200/60 dark:border-gray-700"
+                            className="inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono font-bold text-[11px] border border-gray-300/80 dark:border-gray-600"
                           >
                             {score}
                           </span>
                         ))
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-gray-500 font-semibold">—</span>
                       )}
                     </div>
                   </td>
@@ -625,34 +626,34 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
                         g.quiz15Scores.map((score, idx) => (
                           <span
                             key={idx}
-                            className="inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-mono font-semibold text-[11px] border border-gray-200/60 dark:border-gray-700"
+                            className="inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono font-bold text-[11px] border border-gray-300/80 dark:border-gray-600"
                           >
                             {score}
                           </span>
                         ))
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-gray-500 font-semibold">—</span>
                       )}
                     </div>
                   </td>
                   {/* Mid-term formatted as Badge */}
                   <td className="py-3 px-3 text-center">
                     {g.midTermScore !== null && g.midTermScore !== undefined ? (
-                      <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-mono font-bold text-[11px] border border-blue-200/70 dark:border-blue-800/60">
+                      <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/50 text-blue-800 dark:text-blue-200 font-mono font-extrabold text-[11px] border border-blue-300/80 dark:border-blue-800/60">
                         {g.midTermScore}
                       </span>
                     ) : (
-                      <span className="text-gray-400">—</span>
+                      <span className="text-gray-500 font-semibold">—</span>
                     )}
                   </td>
                   {/* Final Exam formatted as Badge */}
                   <td className="py-3 px-3 text-center">
                     {g.finalScore !== null && g.finalScore !== undefined ? (
-                      <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-300 font-mono font-bold text-[11px] border border-purple-200/70 dark:border-purple-800/60">
+                      <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/50 text-purple-800 dark:text-purple-200 font-mono font-extrabold text-[11px] border border-purple-300/80 dark:border-purple-800/60">
                         {g.finalScore}
                       </span>
                     ) : (
-                      <span className="text-gray-400">—</span>
+                      <span className="text-gray-500 font-semibold">—</span>
                     )}
                   </td>
                   {/* Subject Average Column - Centered with Status Badge */}
@@ -669,14 +670,14 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
                       <button
                         onClick={() => handleOpenEdit(g)}
                         title={lang === 'vi' ? 'Sửa môn này' : 'Edit subject'}
-                        className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/50 rounded-lg transition-colors"
+                        className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-purple-700 hover:bg-purple-50 dark:hover:bg-purple-950/50 rounded-lg transition-colors cursor-pointer"
                       >
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => handleDelete(g.id)}
+                        onClick={() => handleOpenDelete(g)}
                         title={lang === 'vi' ? 'Xóa môn' : 'Delete subject'}
-                        className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors"
+                        className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -721,13 +722,13 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
                       title={lang === 'vi' ? 'Bấm để sửa điểm' : 'Click to edit'}
                     >
                       <div className="flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        <span className="font-semibold text-gray-800 dark:text-gray-200 group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition-colors">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                        <span className="font-bold text-gray-950 dark:text-white group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-colors">
                           {s.subjectName}
                         </span>
-                        <span className="text-[10px] text-gray-400">hs {s.coefficient}</span>
+                        <span className="text-[10px] font-bold text-gray-600 dark:text-gray-400">hs {s.coefficient}</span>
                       </div>
-                      <span className="font-black font-mono text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-md bg-white dark:bg-gray-800 border border-emerald-200/60 dark:border-emerald-800/40">
+                      <span className="font-black font-mono text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded-md bg-white dark:bg-gray-800 border border-emerald-300/80 dark:border-emerald-800/40">
                         {sAvg} điểm
                       </span>
                     </div>
@@ -792,12 +793,12 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
                       title={lang === 'vi' ? 'Bấm để sửa điểm' : 'Click to edit'}
                     >
                       <div>
-                        <div className="font-semibold text-gray-800 dark:text-gray-200 group-hover:text-orange-700 dark:group-hover:text-orange-300 transition-colors flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                        <div className="font-bold text-gray-950 dark:text-white group-hover:text-orange-800 dark:group-hover:text-orange-300 transition-colors flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-orange-600" />
                           <span>{s.subjectName}</span>
-                          <span className="text-[10px] text-gray-400 font-normal">hs {s.coefficient}</span>
+                          <span className="text-[10px] text-gray-600 dark:text-gray-400 font-bold">hs {s.coefficient}</span>
                         </div>
-                        <div className="text-[11px] text-orange-700/80 dark:text-orange-400/90 pl-3">
+                        <div className="text-[11px] font-medium text-orange-900 dark:text-orange-200 pl-3">
                           {s.finalScore === null || s.finalScore < 8
                             ? lang === 'vi'
                               ? 'Cần tăng điểm thi kiểm tra và bài thi cuối kỳ'
@@ -886,16 +887,23 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
               <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-3.5">
                 <div className="grid grid-cols-3 gap-3">
                   <div className="col-span-2">
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                      {t.periods.subject} *
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1 flex items-center justify-between">
+                      <span>{t.periods.subject} <span className="text-rose-500">*</span></span>
+                      <span className="text-[10px] text-purple-600 dark:text-purple-400 font-normal">Chọn từ danh mục</span>
                     </label>
-                    <input
-                      type="text"
+                    <SubjectCombobox
                       required
                       value={editingItem.subjectName}
-                      onChange={(e) => setEditingItem({ ...editingItem, subjectName: e.target.value })}
+                      subjects={subjects}
+                      onChange={(name, selectedSub) => {
+                        setEditingItem({
+                          ...editingItem,
+                          subjectName: name,
+                          coefficient: selectedSub ? selectedSub.coefficient : editingItem.coefficient,
+                        });
+                      }}
                       placeholder="Toán, Vật lý..."
-                      className="w-full px-3 py-2 text-xs sm:text-[13px] rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-xs sm:placeholder:text-[12px] placeholder:text-gray-400 dark:placeholder:text-gray-500 outline-none focus:ring-2 focus:ring-purple-500"
+                      className="w-full pl-3 pr-9 py-2 text-xs sm:text-[13px] rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-gray-400 outline-none focus:ring-2 focus:ring-purple-500"
                     />
                   </div>
                   <div>
@@ -1039,22 +1047,121 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
               </div>
 
               {/* Modal Footer */}
-              <div className="flex items-center justify-end gap-2 px-4 sm:px-6 py-3 sm:py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-850 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
-                >
-                  {t.common.cancel}
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white shadow-xs"
-                >
-                  {t.common.save}
-                </button>
+              <div className="flex items-center justify-between gap-2 px-4 sm:px-6 py-3 sm:py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-850 shrink-0">
+                <div>
+                  {editingItem.id && grades.some((i) => i.id === editingItem.id) && (
+                    <button
+                      type="button"
+                      id="btn-delete-grade-modal"
+                      onClick={() => handleOpenDelete(editingItem)}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/40 transition-colors cursor-pointer active:scale-95"
+                      title={lang === 'vi' ? 'Xóa điểm môn học này' : 'Delete subject grade'}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{lang === 'vi' ? 'Xóa' : 'Delete'}</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsModalOpen(false);
+                      setEditingItem(null);
+                    }}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                  >
+                    {lang === 'vi' ? 'Đóng' : t.common.cancel}
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-colors cursor-pointer active:scale-95"
+                  >
+                    {t.common.save}
+                  </button>
+                </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Grade Confirmation Modal */}
+      {itemToDelete && (
+        <div
+          data-app-modal="true"
+          {...modalTouchHandlers}
+          className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200"
+          onClick={() => setItemToDelete(null)}
+        >
+          <div
+            className="bg-white dark:bg-gray-900 rounded-2xl max-w-sm w-full p-5 border border-gray-200 dark:border-gray-800 shadow-2xl relative animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 border border-rose-200 dark:border-rose-900/50">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  {lang === 'vi' ? 'Xác nhận xóa điểm môn?' : 'Delete Subject Grade?'}
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  {lang === 'vi'
+                    ? 'Bạn có chắc chắn muốn xóa toàn bộ điểm của môn này?'
+                    : 'Are you sure you want to delete all grades for this subject?'}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 my-3.5 rounded-xl bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 text-xs space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-gray-900 dark:text-white text-sm truncate">
+                  {itemToDelete.subjectName}
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300">
+                  {itemToDelete.semester === 'sem1'
+                    ? (lang === 'vi' ? 'Học kỳ 1' : 'Semester 1')
+                    : (lang === 'vi' ? 'Học kỳ 2' : 'Semester 2')}
+                </span>
+              </div>
+              <div className="text-gray-600 dark:text-gray-400 flex items-center gap-2 text-[11px]">
+                <span>{lang === 'vi' ? `Hệ số ${itemToDelete.coefficient}` : `Weight ${itemToDelete.coefficient}`}</span>
+                <span>•</span>
+                <span>
+                  {lang === 'vi' ? 'Điểm TB: ' : 'Avg: '}
+                  <strong className="text-purple-600 dark:text-purple-400">
+                    {getDisplaySubjectAverage(itemToDelete)}
+                  </strong>
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 pt-1.5 border-t border-gray-200/60 dark:border-gray-700/60 text-[11px] text-gray-500 dark:text-gray-400">
+                <div>Miệng: {itemToDelete.oralScores?.length ? itemToDelete.oralScores.join(', ') : '—'}</div>
+                <div>15 phút: {itemToDelete.quiz15Scores?.length ? itemToDelete.quiz15Scores.join(', ') : '—'}</div>
+                <div>Giữa kỳ: {itemToDelete.midTermScore ?? '—'}</div>
+                <div>Cuối kỳ: {itemToDelete.finalScore ?? '—'}</div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setItemToDelete(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+              >
+                {lang === 'vi' ? 'Hủy' : t.common.cancel}
+              </button>
+              <button
+                type="button"
+                id="btn-confirm-delete-subject-grade"
+                onClick={handleConfirmDelete}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition-colors cursor-pointer active:scale-95"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{lang === 'vi' ? 'Xác nhận xóa' : 'Delete'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

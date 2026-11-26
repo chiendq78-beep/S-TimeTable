@@ -11,7 +11,23 @@ export type ActiveTab =
   | 'notices'
   | 'profile'
   | 'system'
-  | 'notifications';
+  | 'classes'
+  | 'notifications'
+  | 'notification_settings'
+  | 'subjects';
+
+export interface SubjectItem {
+  id: string;
+  name: string;
+  code?: string;
+  coefficient?: number;
+  classes?: string[];
+  teacher?: string;
+  room?: string;
+  color?: string;
+  notes?: string;
+  createdAt?: string;
+}
 
 export interface StudentProfile {
   id: string;
@@ -52,6 +68,19 @@ export interface ClassScheduleItem {
   googleEventId?: string;
 }
 
+export interface ClassTimetable {
+  id: string;
+  className: string; // e.g. "11 Chuyên Toán (11T1)"
+  grade?: string; // e.g. "Khối 11"
+  academicYear?: string; // e.g. "2025 - 2026"
+  room?: string; // e.g. "Phòng 302"
+  homeroomTeacher?: string; // e.g. "Cô Trần Thị Mai Lan"
+  isDefault?: boolean;
+  schedule: ClassScheduleItem[];
+  notes?: string;
+  createdAt?: string;
+}
+
 export interface ExtraClassItem {
   id: string;
   title: string;
@@ -84,6 +113,7 @@ export interface ExamItem {
   targetScore?: number;
   actualScore?: number;
   googleEventId?: string;
+  isCompleted?: boolean;
 }
 
 export type Priority = 'low' | 'medium' | 'high';
@@ -138,7 +168,7 @@ export interface GoogleCalendarState {
   lastSyncedAt: string | null;
 }
 
-export type PersonalNotificationType = 'exam' | 'homework' | 'grade' | 'system';
+export type PersonalNotificationType = 'exam' | 'homework' | 'grade' | 'system' | 'extra_class' | 'reminder';
 
 export interface PersonalNotification {
   id: string;
@@ -148,11 +178,15 @@ export interface PersonalNotification {
   createdAt: string; // ISO string or human readable
   isRead: boolean;
   actionUrl?: string;
+  targetId?: string;
   meta?: {
     subject?: string;
     score?: number;
     dueDate?: string;
     examDate?: string;
+    dueStatus?: 'today' | 'upcoming' | 'overdue';
+    timeRemaining?: string;
+    targetId?: string;
   };
 }
 
@@ -160,8 +194,14 @@ export interface NotificationPreferences {
   channels: {
     inApp: boolean;
     email: boolean;
-    push: boolean;
+    push: boolean; // Cho phép nhận tất cả thông báo trên điện thoại
     emailAddress?: string;
+    soundAndVibrate?: boolean; // Âm thanh và rung
+  };
+  categories?: {
+    exam: boolean; // Bật-tắt cho thông báo "Lịch thi"
+    timetable: boolean; // Bật-tắt cho thông báo "Lịch học"
+    homework: boolean; // Bật-tắt thông báo cho "Bài tập"
   };
   rules: {
     examAdvanceDays: number; // 1, 3, 7

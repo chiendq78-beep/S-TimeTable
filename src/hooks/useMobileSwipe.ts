@@ -29,7 +29,10 @@ const TAB_ORDER: ActiveTab[] = [
   'notices',
   'profile',
   'system',
+  'classes',
+  'subjects',
   'notifications',
+  'notification_settings',
 ];
 
 const TAB_NAMES: Record<Language, Record<ActiveTab, string>> = {
@@ -42,7 +45,10 @@ const TAB_NAMES: Record<Language, Record<ActiveTab, string>> = {
     notices: 'Thông Báo Trường',
     profile: 'Hồ Sơ Học Sinh',
     system: 'Cài Đặt',
-    notifications: 'Thông Báo Cá Nhân',
+    classes: 'Quản Lý Lớp Học',
+    subjects: 'Danh Sách Môn Học',
+    notifications: 'Thông Báo',
+    notification_settings: 'Quản Lý Thông Báo',
   },
   en: {
     timetable: 'Timetable',
@@ -53,7 +59,10 @@ const TAB_NAMES: Record<Language, Record<ActiveTab, string>> = {
     notices: 'School Notices',
     profile: 'Student Profile',
     system: 'Settings',
+    classes: 'Class Management',
+    subjects: 'Subject List',
     notifications: 'Notifications',
+    notification_settings: 'Notification Management',
   },
 };
 

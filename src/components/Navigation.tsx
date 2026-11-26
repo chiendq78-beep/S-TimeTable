@@ -2,7 +2,7 @@ import React from 'react';
 import {
   CalendarDays,
   GraduationCap,
-  NotebookPen,
+  ScrollText,
   CheckSquare,
   Award,
   Bell,
@@ -15,6 +15,8 @@ import {
   PanelLeftOpen,
   X,
   Compass,
+  BookOpen,
+  School,
 } from 'lucide-react';
 import { ActiveTab, Language, StudentProfile } from '../types';
 import { translations } from '../i18n/translations';
@@ -81,7 +83,7 @@ export const Navigation: React.FC<NavigationProps> = ({
     {
       id: 'exams',
       label: t.tabs.exams,
-      icon: <NotebookPen className="w-4.5 h-4.5 shrink-0" />,
+      icon: <ScrollText className="w-4.5 h-4.5 shrink-0" />,
       category: 'schedule',
     },
     {
@@ -89,7 +91,7 @@ export const Navigation: React.FC<NavigationProps> = ({
       label: t.tabs.homework,
       icon: <CheckSquare className="w-4.5 h-4.5 shrink-0" />,
       badge: pendingHomeworkCount > 0 ? pendingHomeworkCount : undefined,
-      badgeColor: 'bg-rose-500',
+      badgeColor: 'bg-[#c04328]',
       category: 'academics',
     },
     {
@@ -103,7 +105,7 @@ export const Navigation: React.FC<NavigationProps> = ({
       label: t.tabs.notices,
       icon: <Megaphone className="w-4.5 h-4.5 shrink-0" />,
       badge: unreadNoticesCount > 0 ? unreadNoticesCount : undefined,
-      badgeColor: 'bg-rose-500',
+      badgeColor: 'bg-[#c04328]',
       category: 'academics',
     },
     {
@@ -119,14 +121,21 @@ export const Navigation: React.FC<NavigationProps> = ({
       category: 'system',
     },
     {
-      id: 'notifications',
-      label: t.tabs.notifications,
+      id: 'classes',
+      label: lang === 'vi' ? 'Quản lý lớp học' : 'Class Management',
+      icon: <School className="w-4.5 h-4.5 shrink-0" />,
+      category: 'system',
+    },
+    {
+      id: 'subjects',
+      label: lang === 'vi' ? 'Danh sách môn học' : 'Subject List',
+      icon: <BookOpen className="w-4.5 h-4.5 shrink-0" />,
+      category: 'system',
+    },
+    {
+      id: 'notification_settings',
+      label: t.tabs.notification_settings,
       icon: <Bell className="w-4.5 h-4.5 shrink-0" />,
-      badge:
-        unreadPersonalNotificationsCount && unreadPersonalNotificationsCount > 0
-          ? unreadPersonalNotificationsCount
-          : undefined,
-      badgeColor: 'bg-rose-500',
       category: 'system',
     },
   ];
@@ -270,7 +279,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                             ? (lang === 'vi' ? `${item.badge} thông báo chưa đọc` : `${item.badge} unread notices`)
                             : undefined
                         }
-                        className={`${item.badgeColor || 'bg-rose-500'} text-white font-bold rounded-full ${
+                        className={`${item.badgeColor || 'bg-[#c04328]'} text-white font-bold rounded-full ${
                           !isCollapsed || inDrawer
                             ? 'px-1.5 py-0.5 text-[10.5px] min-w-[18px] text-center'
                             : 'absolute top-1 right-1.5 w-3.5 h-3.5 text-[8.5px] flex items-center justify-center'
@@ -408,7 +417,7 @@ export const Navigation: React.FC<NavigationProps> = ({
             {
               id: 'exams' as ActiveTab,
               label: lang === 'vi' ? 'Lịch thi' : 'Exams',
-              icon: <NotebookPen className="w-5 h-5 shrink-0" />,
+              icon: <ScrollText className="w-5 h-5 shrink-0" />,
             },
             {
               id: 'timetable' as ActiveTab,
@@ -455,7 +464,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                   <div className="relative">
                     {tab.icon}
                     {tab.badge !== undefined && (
-                      <span className="absolute -top-1 -right-2 w-3.5 h-3.5 bg-rose-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                      <span className="absolute -top-1 -right-2 w-3.5 h-3.5 bg-[#c04328] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
                         {tab.badge}
                       </span>
                     )}

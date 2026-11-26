@@ -11,9 +11,11 @@ import {
   StudentProfile,
   PersonalNotification,
   NotificationPreferences,
+  SubjectItem,
 } from './types';
 import { StorageService } from './services/storage';
 import { NotificationService } from './services/notification';
+import { syncAllDueNotifications } from './services/notificationSync';
 import { translations } from './i18n/translations';
 
 // Components
@@ -28,6 +30,9 @@ import { NoticesView } from './components/NoticesView';
 import { StudentProfileView } from './components/StudentProfileView';
 import { SystemSettingsView } from './components/SystemSettingsView';
 import { NotificationCenterView } from './components/NotificationCenterView';
+import { NotificationManagementView } from './components/NotificationManagementView';
+import { SubjectsManagementView } from './components/SubjectsManagementView';
+import { ClassManagementView } from './components/ClassManagementView';
 import { WifiOff, CheckCircle2, AlertCircle } from 'lucide-react';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
@@ -60,6 +65,7 @@ export default function App() {
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(() =>
     StorageService.getNotificationPreferences()
   );
+  const [subjects, setSubjects] = useState<SubjectItem[]>(() => StorageService.getSubjects());
 
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
@@ -76,8 +82,19 @@ export default function App() {
   const isDrawerOpenRef = useRef(isMobileDrawerOpen);
   isDrawerOpenRef.current = isMobileDrawerOpen;
 
-  const handleNavigateTab = (newTab: ActiveTab) => {
+  const [targetDetailId, setTargetDetailId] = useState<{
+    tab: ActiveTab;
+    id?: string;
+    subject?: string;
+  } | null>(null);
+
+  const handleNavigateTab = (newTab: ActiveTab, targetId?: string, subject?: string) => {
     setActiveTab(newTab);
+    if (targetId || subject) {
+      setTargetDetailId({ tab: newTab, id: targetId, subject });
+    } else {
+      setTargetDetailId(null);
+    }
   };
 
   // Mobile edge-swipe gesture listener for back navigation
@@ -247,6 +264,13 @@ export default function App() {
     };
   }, []);
 
+  // Synchronize due notifications on startup for homework, exams, and extra classes
+  useEffect(() => {
+    const synced = syncAllDueNotifications(homework, exams, extraClasses, personalNotifications);
+    setPersonalNotifications(synced);
+    StorageService.savePersonalNotifications(synced);
+  }, []);
+
   // Save Handlers with offline StorageService
   const handleSaveProfile = (newProfile: StudentProfile) => {
     setProfile(newProfile);
@@ -262,16 +286,25 @@ export default function App() {
   const handleSaveExtraClasses = (newClasses: ExtraClassItem[]) => {
     setExtraClasses(newClasses);
     StorageService.saveExtraClasses(newClasses);
+    const synced = syncAllDueNotifications(homework, exams, newClasses, personalNotifications);
+    setPersonalNotifications(synced);
+    StorageService.savePersonalNotifications(synced);
   };
 
   const handleSaveExams = (newExams: ExamItem[]) => {
     setExams(newExams);
     StorageService.saveExams(newExams);
+    const synced = syncAllDueNotifications(homework, newExams, extraClasses, personalNotifications);
+    setPersonalNotifications(synced);
+    StorageService.savePersonalNotifications(synced);
   };
 
   const handleSaveHomework = (newHomework: HomeworkItem[]) => {
     setHomework(newHomework);
     StorageService.saveHomework(newHomework);
+    const synced = syncAllDueNotifications(newHomework, exams, extraClasses, personalNotifications);
+    setPersonalNotifications(synced);
+    StorageService.savePersonalNotifications(synced);
   };
 
   const handleSaveGrades = (newGrades: SubjectGrade[]) => {
@@ -294,10 +327,17 @@ export default function App() {
     StorageService.saveNotificationPreferences(prefs);
   };
 
+  const handleSaveSubjects = (newSubjects: SubjectItem[]) => {
+    setSubjects(newSubjects);
+    StorageService.saveSubjects(newSubjects);
+  };
+
   // Badges
   const pendingHomeworkCount = homework.filter((h) => h.status !== 'completed').length;
   const unreadNoticesCount = notices.filter((n) => !n.isRead).length;
-  const unreadPersonalNotificationsCount = personalNotifications.filter((n) => !n.isRead).length;
+  const unreadPersonalNotificationsCount = personalNotifications.filter(
+    (n) => !n.isRead && (n.type === 'homework' || n.type === 'exam' || n.type === 'extra_class' || n.type === 'reminder')
+  ).length;
 
   return (
     <div className="min-h-screen bg-white dark:bg-[#1a120e] text-[#2c1810] dark:text-[#faf2ea] flex flex-col font-sans transition-colors">
@@ -340,6 +380,8 @@ export default function App() {
           onThemeToggle={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           onToggleSidebar={handleToggleSidebar}
+          onNavigateNotifications={() => handleNavigateTab('notifications')}
+          unreadNotificationsCount={unreadPersonalNotificationsCount}
         />
 
         {/* Main Content Body with Left Vertical Sidebar & Right Main Views */}
@@ -367,12 +409,14 @@ export default function App() {
           />
 
           {/* Main View Area */}
-          <main className="grow min-w-0 w-full overflow-y-auto px-3.5 sm:px-6 py-4 sm:py-5 pb-20 md:pb-12 transition-all bg-[#fbf9f6] dark:bg-[#1a120e]">
+          <main className="grow min-w-0 w-full overflow-y-auto px-2 sm:px-6 py-3.5 sm:py-5 pb-20 md:pb-12 transition-all bg-[#fbf9f6] dark:bg-[#1a120e]">
           {activeTab === 'timetable' && (
             <ClassScheduleView
               schedule={classSchedule}
               onSaveSchedule={handleSaveClassSchedule}
               lang={lang}
+              onShowToast={(msg) => showToast(msg)}
+              subjects={subjects}
             />
           )}
 
@@ -381,6 +425,10 @@ export default function App() {
               extraClasses={extraClasses}
               onSaveExtraClasses={handleSaveExtraClasses}
               lang={lang}
+              openDetailId={targetDetailId?.tab === 'extra_class' ? targetDetailId.id : undefined}
+              openDetailSubject={targetDetailId?.tab === 'extra_class' ? targetDetailId.subject : undefined}
+              onClearOpenDetailId={() => setTargetDetailId(null)}
+              subjects={subjects}
             />
           )}
 
@@ -389,6 +437,10 @@ export default function App() {
               exams={exams}
               onSaveExams={handleSaveExams}
               lang={lang}
+              openDetailId={targetDetailId?.tab === 'exams' ? targetDetailId.id : undefined}
+              openDetailSubject={targetDetailId?.tab === 'exams' ? targetDetailId.subject : undefined}
+              onClearOpenDetailId={() => setTargetDetailId(null)}
+              subjects={subjects}
             />
           )}
 
@@ -397,6 +449,10 @@ export default function App() {
               homeworkList={homework}
               onSaveHomework={handleSaveHomework}
               lang={lang}
+              openDetailId={targetDetailId?.tab === 'homework' ? targetDetailId.id : undefined}
+              openDetailSubject={targetDetailId?.tab === 'homework' ? targetDetailId.subject : undefined}
+              onClearOpenDetailId={() => setTargetDetailId(null)}
+              subjects={subjects}
             />
           )}
 
@@ -406,6 +462,8 @@ export default function App() {
               onSaveGrades={handleSaveGrades}
               lang={lang}
               profile={profile}
+              subjects={subjects}
+              onShowToast={(msg) => showToast(msg)}
             />
           )}
 
@@ -438,32 +496,73 @@ export default function App() {
               }}
               lang={lang}
               onLanguageChange={setLang}
-              onNavigateNotifications={() => handleNavigateTab('notifications')}
+              onNavigateNotifications={() => handleNavigateTab('notification_settings')}
+              onNavigateSubjects={() => handleNavigateTab('subjects')}
+              onNavigateClasses={() => handleNavigateTab('classes')}
+              onSyncTimetables={() => {
+                setClassSchedule(StorageService.getClassSchedule());
+              }}
+              onShowToast={(msg) => showToast(msg)}
               onResetData={() => {
                 StorageService.resetToSeedData();
+                const seedHw = StorageService.getHomework();
+                const seedEx = StorageService.getExams();
+                const seedEc = StorageService.getExtraClasses();
                 setClassSchedule(StorageService.getClassSchedule());
-                setExtraClasses(StorageService.getExtraClasses());
-                setExams(StorageService.getExams());
-                setHomework(StorageService.getHomework());
+                setExtraClasses(seedEc);
+                setExams(seedEx);
+                setHomework(seedHw);
                 setGrades(StorageService.getGrades());
                 setNotices(StorageService.getNotices());
                 setProfile(StorageService.getStudentProfile());
-                setPersonalNotifications(StorageService.getPersonalNotifications());
+                setSubjects(StorageService.getSubjects());
+                const synced = syncAllDueNotifications(seedHw, seedEx, seedEc, StorageService.getPersonalNotifications());
+                setPersonalNotifications(synced);
+                StorageService.savePersonalNotifications(synced);
                 setNotificationPreferences(StorageService.getNotificationPreferences());
                 showToast(lang === 'vi' ? 'Đã khôi phục dữ liệu mẫu ban đầu' : 'Restored default sample data');
               }}
             />
           )}
 
+          {activeTab === 'classes' && (
+            <ClassManagementView
+              lang={lang}
+              onSyncTimetables={() => {
+                setClassSchedule(StorageService.getClassSchedule());
+              }}
+              onNavigateTimetable={() => handleNavigateTab('timetable')}
+              onShowToast={(msg) => showToast(msg)}
+            />
+          )}
+
+          {activeTab === 'subjects' && (
+            <SubjectsManagementView
+              subjects={subjects}
+              onSaveSubjects={handleSaveSubjects}
+              lang={lang}
+              onShowToast={(msg) => showToast(msg)}
+            />
+          )}
+
           {activeTab === 'notifications' && (
             <NotificationCenterView
               notifications={personalNotifications}
-              preferences={notificationPreferences}
               onSaveNotifications={handleSavePersonalNotifications}
+              lang={lang}
+              onNavigateTab={(tab, targetId, subject) => handleNavigateTab(tab, targetId, subject)}
+              onShowToast={(msg) => showToast(msg)}
+            />
+          )}
+
+          {activeTab === 'notification_settings' && (
+            <NotificationManagementView
+              preferences={notificationPreferences}
               onSavePreferences={handleSaveNotificationPreferences}
               lang={lang}
               onNavigateTab={(tab) => handleNavigateTab(tab)}
               onShowToast={(msg) => showToast(msg)}
+              unreadCount={personalNotifications.filter((n) => !n.isRead).length}
             />
           )}
         </main>

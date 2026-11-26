@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   BookOpen,
-  Globe,
+  Bell,
   Menu,
 } from 'lucide-react';
 import { Language, Theme } from '../types';
@@ -9,17 +9,20 @@ import { translations } from '../i18n/translations';
 
 interface HeaderProps {
   lang: Language;
-  onLanguageChange: (lang: Language) => void;
+  onLanguageChange?: (lang: Language) => void;
   theme?: Theme;
   onThemeToggle?: () => void;
   onToggleTheme?: () => void;
   onToggleSidebar?: () => void;
+  onNavigateNotifications?: () => void;
+  unreadNotificationsCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   lang,
-  onLanguageChange,
   onToggleSidebar,
+  onNavigateNotifications,
+  unreadNotificationsCount = 0,
 }) => {
   const t = translations[lang];
 
@@ -56,15 +59,20 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {/* Language Switch */}
+          {/* Notifications Button */}
           <button
-            id="language-toggle-btn"
-            onClick={() => onLanguageChange(lang === 'vi' ? 'en' : 'vi')}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 transition-colors"
-            title="Đổi ngôn ngữ / Switch Language"
+            id="header-notifications-btn"
+            onClick={onNavigateNotifications}
+            className="relative flex items-center justify-center w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 transition-all active:scale-95"
+            title={lang === 'vi' ? 'Quản lý thông báo' : 'Notification Management'}
+            aria-label={lang === 'vi' ? 'Xem thông báo' : 'View notifications'}
           >
-            <Globe className="w-3.5 h-3.5 text-blue-500" />
-            <span>{lang.toUpperCase()}</span>
+            <Bell className="w-4.5 h-4.5 text-[#5b3823] dark:text-[#d7b89f]" />
+            {unreadNotificationsCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-[#c04328] text-white text-[10px] font-bold rounded-full flex items-center justify-center leading-none ring-2 ring-white dark:ring-gray-900 shadow-xs">
+                {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+              </span>
+            )}
           </button>
         </div>
       </div>

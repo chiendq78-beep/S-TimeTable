@@ -12,6 +12,8 @@ import {
   Pencil,
   Building2,
   Download,
+  Filter,
+  ChevronDown,
 } from 'lucide-react';
 import { SchoolNotice, NoticeCategory, Language } from '../types';
 import { translations } from '../i18n/translations';
@@ -32,6 +34,7 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [activeNoticeModal, setActiveNoticeModal] = useState<SchoolNotice | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<SchoolNotice | null>(null);
   const [downloadToast, setDownloadToast] = useState<string | null>(null);
 
   const [editNoticeData, setEditNoticeData] = useState<{
@@ -46,13 +49,19 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
     attachmentInput: string;
   } | null>(null);
 
-  // Swipe-to-close on mobile/tablet
+  // Swipe-to-close on mobile/tablet (handles detail, add, edit, and confirm delete modals)
   const { modalTouchHandlers } = useSwipeToCloseModal({
-    isOpen: !!activeNoticeModal || isAddModalOpen || !!editNoticeData,
+    isOpen: !!activeNoticeModal || isAddModalOpen || !!editNoticeData || itemToDelete !== null,
     onClose: () => {
-      setActiveNoticeModal(null);
-      setIsAddModalOpen(false);
-      setEditNoticeData(null);
+      if (itemToDelete) {
+        setItemToDelete(null);
+      } else if (activeNoticeModal) {
+        setActiveNoticeModal(null);
+      } else if (isAddModalOpen) {
+        setIsAddModalOpen(false);
+      } else if (editNoticeData) {
+        setEditNoticeData(null);
+      }
     },
   });
 
@@ -79,41 +88,46 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
   // 1. Category labels with fallback and 'fee' fully defined
   const categoryLabels: Record<NoticeCategory, { label: string; class: string }> = {
     urgent: {
-      label: t.notices.categories.urgent,
+      label: lang === 'vi' ? 'Khác' : 'Other',
       class: 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300 dark:border-rose-800',
     },
     academic: {
-      label: t.notices.categories.academic || (lang === 'vi' ? 'Học vụ & Lịch thi' : 'Academics & Exams'),
+      label: lang === 'vi' ? 'Học vụ & Lịch thi' : 'Academics & Exams',
       class: 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800',
     },
     activity: {
-      label: t.notices.categories.activity || (lang === 'vi' ? 'Hoạt động - Đoàn Đội' : 'Extracurricular & Clubs'),
+      label: lang === 'vi' ? 'Hoạt động - Đoàn hội' : 'Extracurricular & Clubs',
       class: 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800',
     },
     holiday: {
-      label: t.notices.categories.holiday || (lang === 'vi' ? 'Lịch nghỉ lễ / Tết' : 'Holidays & Breaks'),
+      label: lang === 'vi' ? 'Lịch nghỉ lễ / Tết' : 'Holidays & Breaks',
       class: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800',
     },
     fee: {
-      label: t.notices.categories.fee || (lang === 'vi' ? 'Học phí & Khoản thu' : 'Tuition & Fees'),
+      label: lang === 'vi' ? 'Học phí & Khoản thu' : 'Tuition & Fees',
       class: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800',
     },
     general: {
-      label: t.notices.categories.general || (lang === 'vi' ? 'Thông báo chung' : 'General Info'),
+      label: lang === 'vi' ? 'Khác' : 'Other',
       class: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 border border-gray-300 dark:border-gray-700',
     },
   };
 
-  // 5. Total unread synchronization
+  // Total unread synchronization
   const totalUnreadCount = notices.filter((n) => !n.isRead).length;
 
-  // Filter notices
+  // Filter notices based on dropdown selection
   const filteredNotices = notices.filter((n) => {
     if (selectedCategory === 'all') return true;
+    if (selectedCategory === 'academic') return n.category === 'academic';
+    if (selectedCategory === 'activity') return n.category === 'activity';
+    if (selectedCategory === 'other') {
+      return n.category !== 'academic' && n.category !== 'activity';
+    }
     return n.category === selectedCategory;
   });
 
-  // 4. Sort notices: Pinned notices stick to the top, then newest date
+  // Sort notices: Pinned notices stick to the top, then newest date
   const sortedNotices = [...filteredNotices].sort((a, b) => {
     if (a.isPinned && !b.isPinned) return -1;
     if (!a.isPinned && b.isPinned) return 1;
@@ -130,7 +144,7 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
     onSaveNotices(updated);
   };
 
-  // 4. Pin/Unpin action
+  // Pin/Unpin action
   const handleTogglePin = (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     const updated = notices.map((n) =>
@@ -142,12 +156,19 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
     }
   };
 
-  const handleDelete = (id: string, e?: React.MouseEvent) => {
+  // Delete notice with confirmation dialog
+  const handleDeleteClick = (item: SchoolNotice, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    onSaveNotices(notices.filter((n) => n.id !== id));
-    if (activeNoticeModal?.id === id) {
+    setItemToDelete(item);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!itemToDelete) return;
+    onSaveNotices(notices.filter((n) => n.id !== itemToDelete.id));
+    if (activeNoticeModal?.id === itemToDelete.id) {
       setActiveNoticeModal(null);
     }
+    setItemToDelete(null);
   };
 
   const handleDownloadAttachment = (filename: string) => {
@@ -276,76 +297,46 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
           <button
             id="add-notice-btn"
             onClick={() => setIsAddModalOpen(true)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700 shadow-sm shadow-amber-500/20 transition-all active:scale-[0.98]"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 shadow-sm shadow-blue-500/20 transition-all active:scale-[0.98] cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>{t.notices.addNotice}</span>
+            <span>{lang === 'vi' ? 'Thêm mới' : 'Add New'}</span>
           </button>
         </div>
       </div>
 
-      {/* 1 & 5. Category Filter Chips with Unread Badges synchronized */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-        {/* Tab Tất Cả */}
-        <button
-          onClick={() => setSelectedCategory('all')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 border inline-flex items-center gap-1.5 ${
-            selectedCategory === 'all'
-              ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
-              : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-800 hover:border-amber-300'
-          }`}
-        >
-          <span>
-            {t.common.all} ({notices.length})
+      {/* Category Filter Dropdown List */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="relative inline-flex items-center">
+          <Filter className="w-4 h-4 text-gray-400 absolute left-3 pointer-events-none" />
+          <select
+            id="filter-notice-category"
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="pl-9 pr-9 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-800 shadow-2xs hover:border-blue-400 dark:hover:border-blue-600 transition-colors appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          >
+            <option value="all">
+              {lang === 'vi' ? `Tất cả (${notices.length})` : `All (${notices.length})`}
+            </option>
+            <option value="academic">
+              {lang === 'vi' ? 'Học vụ & Lịch thi' : 'Academics & Exams'}
+            </option>
+            <option value="activity">
+              {lang === 'vi' ? 'Hoạt động - Đoàn hội' : 'Extracurricular & Clubs'}
+            </option>
+            <option value="other">
+              {lang === 'vi' ? 'Khác' : 'Other'}
+            </option>
+          </select>
+          <ChevronDown className="w-4 h-4 text-gray-400 pointer-events-none absolute right-3" />
+        </div>
+
+        {totalUnreadCount > 0 && (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200/80 dark:border-rose-900/50">
+            <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+            {totalUnreadCount} {lang === 'vi' ? 'mới' : 'unread'}
           </span>
-          {/* 5. Clear red badge for unread count matching the left menu */}
-          {totalUnreadCount > 0 && (
-            <span
-              className={`px-1.5 py-0.5 rounded-full text-[10px] font-black leading-none ${
-                selectedCategory === 'all'
-                  ? 'bg-white text-rose-600 shadow-2xs'
-                  : 'bg-rose-500 text-white animate-pulse'
-              }`}
-            >
-              🔴 {totalUnreadCount} {lang === 'vi' ? 'mới' : 'new'}
-            </span>
-          )}
-        </button>
-
-        {/* Category Tabs */}
-        {Object.entries(categoryLabels).map(([catKey, catVal]) => {
-          if (!catVal || !catVal.label) return null; // Defend against empty ghost tab
-          const catTotal = notices.filter((n) => n.category === catKey).length;
-          const catUnread = notices.filter((n) => n.category === catKey && !n.isRead).length;
-          const isSelected = selectedCategory === catKey;
-
-          return (
-            <button
-              key={catKey}
-              onClick={() => setSelectedCategory(catKey)}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 border inline-flex items-center gap-1.5 ${
-                isSelected
-                  ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
-                  : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-800 hover:border-amber-300'
-              }`}
-            >
-              <span>
-                {catVal.label} ({catTotal})
-              </span>
-              {/* Red dot badge for category unread count */}
-              {catUnread > 0 && (
-                <span
-                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-black leading-none ${
-                    isSelected ? 'bg-white text-rose-600 shadow-2xs' : 'bg-rose-500 text-white'
-                  }`}
-                  title={`${catUnread} ${lang === 'vi' ? 'tin chưa đọc' : 'unread'}`}
-                >
-                  🔴 {catUnread}
-                </span>
-              )}
-            </button>
-          );
-        })}
+        )}
       </div>
 
       {/* Notices List */}
@@ -518,8 +509,8 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
                   {/* Delete Button */}
                   <button
                     type="button"
-                    onClick={(e) => handleDelete(item.id, e)}
-                    className="p-1.5 text-gray-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-gray-800 transition-colors"
+                    onClick={(e) => handleDeleteClick(item, e)}
+                    className="p-1.5 text-gray-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-gray-800 transition-colors cursor-pointer"
                     title={t.common.delete}
                   >
                     <Trash2 className="w-4 h-4" />
@@ -746,50 +737,21 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                      Phân loại danh mục
-                    </label>
-                    <select
-                      value={newNotice.category}
-                      onChange={(e) =>
-                        setNewNotice({ ...newNotice, category: e.target.value as NoticeCategory })
-                      }
-                      className="w-full px-3 py-2 text-xs sm:text-[13px] rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500"
-                    >
-                      <option value="general">{categoryLabels.general.label}</option>
-                      <option value="urgent">{categoryLabels.urgent.label}</option>
-                      <option value="academic">{categoryLabels.academic.label}</option>
-                      <option value="activity">{categoryLabels.activity.label}</option>
-                      <option value="holiday">{categoryLabels.holiday.label}</option>
-                      <option value="fee">{categoryLabels.fee.label}</option>
-                    </select>
-                  </div>
-
-                  <div className="flex flex-col justify-end gap-2 pb-1">
-                    {/* Urgent Checkbox */}
-                    <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-rose-600 dark:text-rose-400">
-                      <input
-                        type="checkbox"
-                        checked={newNotice.isUrgent}
-                        onChange={(e) => setNewNotice({ ...newNotice, isUrgent: e.target.checked })}
-                        className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500"
-                      />
-                      <span>{t.notices.categories.urgent}</span>
-                    </label>
-
-                    {/* 4. Pin Checkbox */}
-                    <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-amber-600 dark:text-amber-400">
-                      <input
-                        type="checkbox"
-                        checked={newNotice.isPinned}
-                        onChange={(e) => setNewNotice({ ...newNotice, isPinned: e.target.checked })}
-                        className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500"
-                      />
-                      <span>{t.notices.pinNotice || 'Ghim lên đầu'}</span>
-                    </label>
-                  </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    Phân loại danh mục
+                  </label>
+                  <select
+                    value={newNotice.category}
+                    onChange={(e) =>
+                      setNewNotice({ ...newNotice, category: e.target.value as NoticeCategory })
+                    }
+                    className="w-full px-3 py-2 text-xs sm:text-[13px] rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="academic">{lang === 'vi' ? 'Học vụ & Lịch thi' : 'Academics & Exams'}</option>
+                    <option value="activity">{lang === 'vi' ? 'Hoạt động - Đoàn hội' : 'Extracurricular & Clubs'}</option>
+                    <option value="general">{lang === 'vi' ? 'Khác' : 'Other'}</option>
+                  </select>
                 </div>
 
                 {/* 4. Attachment Input */}
@@ -925,57 +887,24 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                      Phân loại danh mục
-                    </label>
-                    <select
-                      value={editNoticeData.category}
-                      onChange={(e) =>
-                        setEditNoticeData({
-                          ...editNoticeData,
-                          category: e.target.value as NoticeCategory,
-                        })
-                      }
-                      className="w-full px-3 py-2 text-xs sm:text-[13px] rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500"
-                    >
-                      <option value="general">{categoryLabels.general.label}</option>
-                      <option value="urgent">{categoryLabels.urgent.label}</option>
-                      <option value="academic">{categoryLabels.academic.label}</option>
-                      <option value="activity">{categoryLabels.activity.label}</option>
-                      <option value="holiday">{categoryLabels.holiday.label}</option>
-                      <option value="fee">{categoryLabels.fee.label}</option>
-                    </select>
-                  </div>
-
-                  <div className="flex flex-col justify-end gap-2 pb-1">
-                    {/* Urgent Checkbox */}
-                    <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-rose-600 dark:text-rose-400">
-                      <input
-                        type="checkbox"
-                        checked={editNoticeData.isUrgent}
-                        onChange={(e) =>
-                          setEditNoticeData({ ...editNoticeData, isUrgent: e.target.checked })
-                        }
-                        className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500"
-                      />
-                      <span>{t.notices.categories.urgent}</span>
-                    </label>
-
-                    {/* Pin Checkbox */}
-                    <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-amber-600 dark:text-amber-400">
-                      <input
-                        type="checkbox"
-                        checked={editNoticeData.isPinned}
-                        onChange={(e) =>
-                          setEditNoticeData({ ...editNoticeData, isPinned: e.target.checked })
-                        }
-                        className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500"
-                      />
-                      <span>{t.notices.pinNotice || 'Ghim lên đầu'}</span>
-                    </label>
-                  </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    Phân loại danh mục
+                  </label>
+                  <select
+                    value={editNoticeData.category}
+                    onChange={(e) =>
+                      setEditNoticeData({
+                        ...editNoticeData,
+                        category: e.target.value as NoticeCategory,
+                      })
+                    }
+                    className="w-full px-3 py-2 text-xs sm:text-[13px] rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="academic">{lang === 'vi' ? 'Học vụ & Lịch thi' : 'Academics & Exams'}</option>
+                    <option value="activity">{lang === 'vi' ? 'Hoạt động - Đoàn hội' : 'Extracurricular & Clubs'}</option>
+                    <option value="general">{lang === 'vi' ? 'Khác' : 'Other'}</option>
+                  </select>
                 </div>
 
                 {/* Attachment Input */}
@@ -1037,6 +966,69 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Delete Notice Modal */}
+      {itemToDelete && (
+        <div
+          data-app-modal="true"
+          {...modalTouchHandlers}
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setItemToDelete(null)}
+        >
+          <div
+            className="w-full max-w-sm bg-white dark:bg-gray-900 rounded-2xl p-5 shadow-2xl border border-gray-200 dark:border-gray-800 space-y-4 animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-gray-900 dark:text-white leading-tight">
+                  {lang === 'vi' ? 'Xác nhận xóa thông báo' : 'Confirm Delete Notice'}
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {lang === 'vi' ? 'Hành động này không thể hoàn tác' : 'This action cannot be undone'}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-100 dark:border-gray-800 text-xs space-y-1">
+              <div className="font-bold text-gray-900 dark:text-white line-clamp-2">
+                {itemToDelete.title}
+              </div>
+              <div className="text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                <span>{itemToDelete.sender || itemToDelete.author}</span>
+                <span>•</span>
+                <span>{itemToDelete.date}</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-600 dark:text-gray-300">
+              {lang === 'vi'
+                ? 'Bạn có chắc chắn muốn xóa thông báo này khỏi bảng tin trường không?'
+                : 'Are you sure you want to delete this notice?'}
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setItemToDelete(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+              >
+                {t.common.cancel}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 transition-colors shadow-sm shadow-rose-600/20 cursor-pointer"
+              >
+                {lang === 'vi' ? 'Xác nhận xóa' : 'Delete'}
+              </button>
+            </div>
           </div>
         </div>
       )}
